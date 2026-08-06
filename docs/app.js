@@ -52,6 +52,27 @@
 
   function isBrand(group) { return BRAND_GROUPS[group] === 1; }
 
+  /* 해당 키워드의 실제 검색결과 페이지 URL — 측정 방법론과 같은 대상(네이버·다음=PC 통합
+     검색, 구글=ko/kr). 앱스토어는 공식 웹 검색결과 페이지가 없어 apple.com 통합검색으로 폴백. */
+  function serpUrl(engine, keyword) {
+    var q = encodeURIComponent(keyword);
+    switch (engine) {
+      case "naver": return "https://search.naver.com/search.naver?query=" + q;
+      case "google": return "https://www.google.com/search?q=" + q + "&hl=ko&gl=kr";
+      case "daum": return "https://search.daum.net/search?w=tot&q=" + q;
+      case "playstore": return "https://play.google.com/store/search?q=" + q + "&c=apps&hl=ko&gl=KR";
+      case "appstore": return "https://www.apple.com/kr/search/" + q + "?src=serp";
+    }
+    return null;
+  }
+
+  function goBtn(engine, keyword) {
+    var url = serpUrl(engine, keyword);
+    if (!url) return "–";
+    return '<a class="go-btn" href="' + esc(url) + '" target="_blank" rel="noopener" ' +
+      'title="' + (ENGINE_LABEL[engine] || esc(engine)) + ' 검색결과 새 탭에서 열기">보러가기</a>';
+  }
+
   /* delta value: >0 up, <0 down, 0 flat, "new", "lost", null n/a */
   function deltaOf(r) {
     if (r.rank != null && r.prev_rank != null) return r.prev_rank - r.rank;
@@ -218,6 +239,7 @@
         '<td class="num">' + (r.total != null ? r.total : "–") + "</td>" +
         '<td><span class="badge badge-s-' + esc(r.status) + '">' + (STATUS_LABEL[r.status] || esc(r.status)) + "</span></td>" +
         "<td>" + sparklineSVG(r.engine, r.area, r.keyword) + "</td>" +
+        '<td class="go">' + goBtn(r.engine, r.keyword) + "</td>" +
         '<td class="time">' + esc(r.collected_at || "") + "</td>" +
         "</tr>";
     }
@@ -270,7 +292,13 @@
     });
 
     var links = state.records.filter(function (r) { return r.keyword === keyword && r.matched; });
-    $("modalLinks").innerHTML = links.length
+
+    var goRow = '<div class="link-row"><span class="link-label">검색결과 바로가기</span><span class="go-links">' +
+      ["naver", "google", "daum", "playstore", "appstore"].map(function (eng) {
+        return '<a href="' + esc(serpUrl(eng, keyword)) + '" target="_blank" rel="noopener">' +
+          (ENGINE_LABEL[eng] || eng) + "</a>";
+      }).join(" · ") + "</span></div>";
+    $("modalLinks").innerHTML = goRow + (links.length
       ? links.map(function (r) {
           var label = '<span class="link-label">' +
             (ENGINE_LABEL[r.engine] || esc(r.engine)) + " · " + (AREA_LABEL[r.area] || esc(r.area)) +
@@ -291,7 +319,7 @@
             : "<span>" + esc(r.matched) + "</span>";
           return '<div class="link-row">' + label + body + "</div>";
         }).join("")
-      : '<div class="link-row"><span class="link-label">매칭된 URL 없음</span></div>';
+      : '<div class="link-row"><span class="link-label">매칭된 URL 없음</span></div>');
 
     $("modal").hidden = false;
     document.body.style.overflow = "hidden";
@@ -342,6 +370,7 @@
 
     $("tableBody").addEventListener("click", function (e) {
       var tr = e.target.closest("tr[data-idx]");
+      if (e.target.closest("a")) return; /* 보러가기 링크 클릭은 모달을 띄우지 않는다 */
       if (!tr) return;
       var r = state.records[Number(tr.dataset.idx)];
       if (r) openModal(r);
