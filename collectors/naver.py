@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from bs4 import BeautifulSoup
 
@@ -124,14 +125,38 @@ class NaverRankCollector(BaseCollector):
     key = "naver"
     label = "네이버 통합검색 순위"
 
+    # 차단 대응(2026-08-06 실사고: Actions 러너에서 2번째 키워드부터 240개 연속 차단
+    # — 아침 런은 정상, 러너 IP 평판 복불복): 첫 차단 시 1회 쿨다운 후 재시도(일시
+    # 오탐 회복), 그래도 연속 N개 차단이면 잔여 키워드를 aborted 로 채우고 조기 종료
+    # — 차단된 IP 로 계속 때리면 평판만 악화되고 데이터는 안 나온다(구글과 동일 정책).
+    BLOCK_ABORT = 5
+    BLOCK_COOLDOWN_SEC = 60
+
     def collect(self, keywords: list[str]) -> CollectResult:
         session = make_session({"Referer": "https://www.naver.com/"})
         records: list[RankRecord] = []
+        streak = 0          # 연속 차단 키워드 수
+        cooled = False      # 쿨다운 재시도는 런당 1회
         for i, kw in enumerate(keywords):
             if i:
                 polite_sleep(config.SLEEP_BASE)
-            records.extend(self._collect_one(session, kw))
-        return CollectResult(records, meta={"endpoint": _ENDPOINT, "device": "pc"})
+            recs = self._collect_one(session, kw)
+            if recs[0].status == "blocked" and not cooled:
+                cooled = True
+                time.sleep(self.BLOCK_COOLDOWN_SEC)
+                session = make_session({"Referer": "https://www.naver.com/"})  # 세션 지문 갱신
+                recs = self._collect_one(session, kw)
+            records.extend(recs)
+            streak = streak + 1 if recs[0].status == "blocked" else 0
+            if streak >= self.BLOCK_ABORT:
+                for rest in keywords[i + 1:]:
+                    records.extend(
+                        RankRecord("naver", area, rest, None, 0,
+                                   status="blocked", detail="aborted")
+                        for area in ("ad", "organic"))
+                break
+        return CollectResult(records, meta={"endpoint": _ENDPOINT, "device": "pc",
+                                            "block_aborted": streak >= self.BLOCK_ABORT})
 
     # ── 키워드 1개 → ad/organic 레코드 2개 ──────────────
     def _collect_one(self, session, kw: str) -> list[RankRecord]:
