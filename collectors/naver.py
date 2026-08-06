@@ -1,0 +1,186 @@
+"""네이버 통합검색(PC) 키워드 순위 수집기 — 광고/오가닉 영역 분리 측정.
+
+엔드포인트 채택 근거: PC(search.naver.com)와 모바일(m.search.naver.com) 응답 HTML 을
+모두 덤프해 비교한 결과 PC 쪽 광고 마킹이 명시적이다 — 파워링크는
+`div.sc_new.ad_section`(내부 `.nad_area li.lst` 가 광고 1건), 브랜드검색은
+`div.brand_search` 클래스로 확정 구분되는 반면, 모바일은 `#main_pack` 도 없고
+광고 래퍼가 `section.sc.sp_brand` 처럼 오가닉 섹션과 같은 계열 클래스라 구분이
+약하다. 따라서 PC 통합검색을 채택.
+
+파싱 메모(2026-08 구조):
+- 결과 블록 = `#main_pack` 하위 `div.sc_new` / `div.brand_search` / `#place-app-root`
+  중 최상위(서로 중첩 시 바깥쪽만). 문서 순서가 곧 노출 순서다.
+- 광고 블록 판별: `ad_section`·`brand_search` 클래스, 또는 블록 안에
+  ader.naver.com 클릭 링크 존재(파워컨텐츠류 네이티브 광고가 이 케이스).
+- 파워링크 광고의 랜딩 URL 은 ader 리다이렉트라 href 만으로는 자사 판별이 안 되고,
+  표시 URL 텍스트(`a.lnk_url`)와 onclick 의 `urlencode("<원본URL>")` 인자에 원본이
+  남는다 → 둘 다 후보로 모아 config.is_self_url 에 넣는다.
+- 브랜드검색/파워컨텐츠 블록은 내부 아이템 마크업이 해시 클래스라 분해가 취약하다
+  → 블록 전체를 광고 유닛 1개로 취급하고 블록 원문에서 http(s) URL 을 긁어 판별.
+- 오가닉 섹션명은 헤더가 없는 블록이 많아(개별 웹문서 카드) 링크 호스트로 보완.
+"""
+from __future__ import annotations
+
+import re
+
+from bs4 import BeautifulSoup
+
+import config
+from collectors.base import (BaseCollector, CollectResult, RankRecord,
+                             make_session, polite_sleep)
+
+_ENDPOINT = "https://search.naver.com/search.naver"
+
+# 차단/캡차 페이지 판별 문구 — 네이버는 봇 판정 시 403 또는 자동입력 방지 안내를 준다
+_BLOCK_MARKERS = ("자동입력 방지", "비정상적인 검색", "captcha", "wtm_spam")
+
+# 헤더 없는 오가닉 블록의 섹션명 보완용 호스트 → 이름 매핑
+_HOST_SECTIONS = (
+    ("blog.naver.com", "블로그"),
+    ("cafe.naver.com", "카페"),
+    ("kin.naver.com", "지식iN"),
+    ("news.naver.com", "뉴스"),
+    ("shopping.naver.com", "쇼핑"),
+    ("terms.naver.com", "지식백과"),
+)
+
+_RAW_URL_RE = re.compile(r"https?://[^\"'\s\\]+")
+_ONCLICK_URL_RE = re.compile(r'urlencode\("(https?://[^"]+)"\)')
+
+
+def _outer_blocks(main_pack) -> list:
+    """문서 순서의 최상위 결과 블록만 — 파워링크처럼 sc_new 가 래퍼 안에 중첩되는
+    경우가 있어 자식 순회 대신 select 후 조상 중복을 걸러낸다."""
+    cand = main_pack.select("div.sc_new, div.brand_search, #place-app-root")
+    picked = set()
+    out = []
+    for el in cand:
+        if any(id(p) in picked for p in el.parents):
+            continue
+        picked.add(id(el))
+        out.append(el)
+    return out
+
+
+def _header_of(blk) -> str:
+    h = blk.select_one("h2, .fds-comps-header-headline, .api_title, .title_area strong")
+    return h.get_text(" ", strip=True) if h else ""
+
+
+def _is_ad_block(blk) -> bool:
+    cls = blk.get("class") or []
+    if "ad_section" in cls or "brand_search" in cls:
+        return True
+    return blk.select_one('a[href*="ader.naver.com"]') is not None
+
+
+def _ad_units(blk) -> list[tuple[str, list[str]]]:
+    """광고 블록 → (섹션명, 자사판별 후보문자열들) 유닛 목록, 노출 순서."""
+    cls = blk.get("class") or []
+    if "ad_section" in cls:
+        units = []
+        for li in blk.select(".nad_area li.lst") or blk.select("li"):
+            cands = []
+            # 콤마 셀렉터는 문서순 첫 매칭이라 조상(.url_area)이 먼저 잡힘 → 명시 우선순위
+            disp = li.select_one("a.lnk_url") or li.select_one(".url_area")
+            if disp is not None:
+                cands.append(disp.get_text(strip=True))
+            cands.extend(_ONCLICK_URL_RE.findall(str(li)))
+            cands.extend(a.get("href", "") for a in li.select("a[href]"))
+            units.append(("파워링크", cands))
+        return units
+    if "brand_search" in cls:
+        section = "브랜드검색"
+    else:
+        section = _header_of(blk)[:20] or "콘텐츠광고"
+    # 원본 URL 이 onclick·데이터 속성 등 어디에 있을지 모르므로 블록 원문에서 수집
+    return [(section, _RAW_URL_RE.findall(str(blk)))]
+
+
+def _organic_section(blk) -> str:
+    h = _header_of(blk)
+    if h:
+        return h[:20]
+    if blk.select_one(".fds-web-root") is not None:
+        return "웹사이트"
+    if (blk.get("id") or "") == "place-app-root":
+        return "플레이스"
+    for a in blk.select("a[href]"):
+        for host, name in _HOST_SECTIONS:
+            if host in a["href"]:
+                return name
+    return "기타"
+
+
+class NaverRankCollector(BaseCollector):
+    key = "naver"
+    label = "네이버 통합검색 순위"
+
+    def collect(self, keywords: list[str]) -> CollectResult:
+        session = make_session({"Referer": "https://www.naver.com/"})
+        records: list[RankRecord] = []
+        for i, kw in enumerate(keywords):
+            if i:
+                polite_sleep(config.SLEEP_BASE)
+            records.extend(self._collect_one(session, kw))
+        return CollectResult(records, meta={"endpoint": _ENDPOINT, "device": "pc"})
+
+    # ── 키워드 1개 → ad/organic 레코드 2개 ──────────────
+    def _collect_one(self, session, kw: str) -> list[RankRecord]:
+        def both(status: str, detail: str = "") -> list[RankRecord]:
+            return [RankRecord("naver", area, kw, None, 0, status=status, detail=detail)
+                    for area in ("ad", "organic")]
+
+        try:
+            resp = session.get(_ENDPOINT, params={"query": kw},
+                               timeout=config.REQUEST_TIMEOUT)
+        except Exception as e:  # 네트워크 계열 — 차단과 구분해 기록
+            return both("error", f"{type(e).__name__}: {e}")
+
+        if resp.status_code in (403, 429):
+            return both("blocked", f"HTTP {resp.status_code}")
+        if resp.status_code != 200:
+            return both("error", f"HTTP {resp.status_code}")
+        head = resp.text[:3000]
+        if any(m in head for m in _BLOCK_MARKERS):
+            return both("blocked", "차단/캡차 안내 페이지")
+
+        main_pack = BeautifulSoup(resp.text, "lxml").select_one("#main_pack")
+        if main_pack is None:
+            return both("parse_fail", "#main_pack 없음 — SERP 구조 변경 의심")
+
+        ad_units: list[tuple[str, list[str]]] = []
+        organic: list[tuple[str, object]] = []
+        for blk in _outer_blocks(main_pack):
+            if _is_ad_block(blk):
+                ad_units.extend(_ad_units(blk))
+            else:
+                organic.append((_organic_section(blk), blk))
+
+        return [self._rank_ad(kw, ad_units), self._rank_organic(kw, organic)]
+
+    @staticmethod
+    def _rank_ad(kw: str, units: list[tuple[str, list[str]]]) -> RankRecord:
+        if not units:
+            return RankRecord("naver", "ad", kw, None, 0, status="no_section")
+        for pos, (section, cands) in enumerate(units, start=1):
+            hit = next((c for c in cands if config.is_self_url(c)), None)
+            if hit is not None:
+                return RankRecord("naver", "ad", kw, pos, len(units),
+                                  section=section, matched=hit[:200])
+        return RankRecord("naver", "ad", kw, None, len(units), status="not_found")
+
+    @staticmethod
+    def _rank_organic(kw: str, blocks: list[tuple[str, object]]) -> RankRecord:
+        if not blocks:
+            # 페이지는 왔는데 결과 블록 0개 — 구조 변경 신호
+            return RankRecord("naver", "organic", kw, None, 0, status="parse_fail",
+                              detail="결과 블록 0개 추출")
+        scan = blocks[:config.ORGANIC_SCAN_LIMIT]
+        for pos, (section, blk) in enumerate(scan, start=1):
+            hit = next((a["href"] for a in blk.select("a[href]")
+                        if config.is_self_url(a["href"])), None)
+            if hit is not None:
+                return RankRecord("naver", "organic", kw, pos, len(scan),
+                                  section=section, matched=hit[:200])
+        return RankRecord("naver", "organic", kw, None, len(scan), status="not_found")

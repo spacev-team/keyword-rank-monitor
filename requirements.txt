@@ -1,0 +1,7 @@
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+google-play-scraper>=1.2
+# 선택: Google Sheets 미러 사용 시
+# gspread>=6.0
+# google-auth>=2.28

@@ -1,0 +1,7 @@
+.env
+data/
+docs/data/
+secrets/
+logs/
+__pycache__/
+*.pyc

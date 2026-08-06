@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>삼삼엠투 키워드 순위 모니터링</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <h1>삼삼엠투 키워드 순위 모니터링</h1>
+    <div class="meta">
+      <span id="generatedAt" class="generated-at">–</span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <section aria-label="엔진별 요약">
+    <div id="summaryCards" class="cards"></div>
+  </section>
+
+  <section aria-label="필터">
+    <div class="filter-bar" id="filterBar">
+      <select id="fEngine" title="엔진">
+        <option value="">엔진 전체</option>
+        <option value="naver">네이버</option>
+        <option value="google">구글</option>
+        <option value="daum">다음</option>
+        <option value="playstore">플레이스토어</option>
+        <option value="appstore">앱스토어</option>
+      </select>
+      <select id="fArea" title="영역">
+        <option value="">영역 전체</option>
+        <option value="ad">광고</option>
+        <option value="organic">오가닉</option>
+        <option value="app">앱</option>
+      </select>
+      <select id="fGroup" title="그룹">
+        <option value="">그룹 전체</option>
+        <option value="brand">브랜드</option>
+        <option value="generic">일반</option>
+      </select>
+      <select id="fStatus" title="상태">
+        <option value="">상태 전체</option>
+        <option value="ok">정상</option>
+        <option value="not_found">권외</option>
+        <option value="no_section">광고영역 없음</option>
+        <option value="blocked">차단</option>
+        <option value="parse_fail">구조변경 의심</option>
+        <option value="error">수집오류</option>
+      </select>
+      <input type="search" id="fKeyword" placeholder="키워드 검색" autocomplete="off">
+      <span id="rowCount" class="row-count"></span>
+    </div>
+  </section>
+
+  <section aria-label="순위 테이블">
+    <div class="table-wrap">
+      <table id="rankTable">
+        <thead>
+          <tr>
+            <th data-sort="keyword" class="sortable">키워드</th>
+            <th>그룹</th>
+            <th>엔진</th>
+            <th>영역</th>
+            <th data-sort="rank" class="sortable num">순위</th>
+            <th data-sort="delta" class="sortable">변동</th>
+            <th>섹션</th>
+            <th class="num">결과수</th>
+            <th>상태</th>
+            <th>추이</th>
+            <th>수집시각</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+      <div id="emptyMsg" class="empty-msg" hidden>조건에 맞는 데이터가 없습니다.</div>
+    </div>
+  </section>
+</main>
+
+<div id="modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 id="modalTitle"></h2>
+      <button type="button" class="modal-close" data-close aria-label="닫기">&times;</button>
+    </div>
+    <div class="chart-box"><canvas id="modalChart"></canvas></div>
+    <div id="modalLinks" class="modal-links"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

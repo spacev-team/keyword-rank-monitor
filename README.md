@@ -1,0 +1,70 @@
+# keyword-rank-monitor — 삼삼엠투 키워드 순위 모니터링
+
+브랜드 키워드(30 + 확장 39) + 검색광고 매출 상위 일반 키워드(171) = **240개 키워드**가
+**네이버 · 구글 · 다음 · Play Store · App Store** 에서 몇 위에 노출되는지 매일 4회 수집한다.
+네이버/구글/다음은 **검색광고(ad)와 오가닉(organic)을 분리 측정**한다.
+
+**대시보드**: https://spacev-team.github.io/keyword-rank-monitor/ (매 수집 런 종료 시 자동 갱신)
+
+## 아키텍처 (external-metrics-monitor 와 동일 패턴)
+
+```
+n8n(스케줄) → GitHub workflow_dispatch → Actions 러너(수집)
+                                          ├─ state 브랜치: data/rank_history.sqlite (전체 이력)
+                                          └─ GitHub Pages: docs/ 대시보드 + data/*.json
+```
+
+| 스케줄(KST) | mode | 엔진 |
+|---|---|---|
+| 07:30 | `daily` | 네이버·**구글**·다음·플레이·앱스토어 (구글은 하루 1회만) |
+| 11:30 / 16:30 / 21:30 | `core` | 구글 제외 4개 엔진 |
+
+n8n 설정·운영 절차는 [`ops/n8n-scheduling.md`](ops/n8n-scheduling.md).
+
+## 측정 정의
+
+| 엔진 | 영역 | 방법 | rank 의 의미 |
+|---|---|---|---|
+| naver | ad | PC 통합검색 HTML 파싱 | 파워링크·브랜드검색 광고 유닛(상단+하단 통합) 중 자사 순번 |
+| naver | organic | 〃 | 광고 제외 결과 블록 DOM 순서 중 자사 첫 매칭(섹션명 기록) |
+| google | ad / organic | SerpAPI(`SERPAPI_KEY` 필요) 또는 직접 파싱 | 상동 |
+| daum | ad / organic | 통합검색 HTML 파싱 | 프리미엄링크 / 오가닉 블록 |
+| playstore | app | google_play_scraper.search (상위 30) | 검색 결과 중 자사 앱 순번 |
+| appstore | app | iTunes Search API (상위 200) | 상동 |
+
+- 자사 판별: 결과 URL 이 `33m2.co.kr`(서브도메인·광고 리다이렉트 포함) 또는 자사 앱 상세 링크.
+- `rank=NULL` 은 `status` 로 구분: `not_found`(정상 파싱, 미노출) / `no_section`(광고 영역
+  없음) / `blocked`(봇 차단) / `parse_fail`(SERP 구조 변경 의심) / `error`(네트워크 등).
+  → **권외와 수집 실패를 절대 섞지 않는다.**
+- ⚠️ 구글은 2025-01부터 검색에 JS 필수 → 직접 스크레이핑 불가. `SERPAPI_KEY`(Actions 시크릿
+  `KRM_DOTENV` 내) 설정 시에만 실데이터, 미설정 시 `blocked` 기록.
+- ⚠️ SERP 는 기기·지역·개인화로 달라짐 — 동일 방법론 반복 측정의 **추세 추적 프록시**.
+
+## 로컬 실행 (개발·점검용)
+
+```
+pip install -r requirements.txt
+python run.py --mode daily                  # 구글 포함 전체
+python run.py --mode core                   # 구글 제외
+python run.py --keywords 삼삼엠투,단기임대 --dry-run   # 스모크 테스트
+python run.py --export-csv out.csv          # 이력 CSV(엑셀 호환 BOM)
+python export_dashboard.py                  # docs/data/*.json 재생성
+```
+
+로컬 폴백 스케줄러(`scripts/register_tasks.ps1`)는 n8n 운영 중 **활성화 금지**(이중 수집).
+
+## 저장
+
+- **SQLite** `data/rank_history.sqlite` — 진실 원본, Actions `state` 브랜치에 보존(매 런 복원→적재→push).
+- **docs/data/latest.json · trends.json** — 대시보드용, 매 런 `export_dashboard.py` 가 생성.
+- **Google Sheets 미러(선택)** — `KRM_SHEET_ID` + 서비스계정 설정 시 `키워드_순위` 시트 누적.
+
+## 알림(선택)
+
+`KRM_GOOGLE_CHAT_WEBHOOK_URL` 설정 시 런마다 요약(커버리지·TOP3·수집이상) +
+직전 런 대비 악화 알림(노출 이탈 / 5계단 이상 하락 / 브랜드 TOP3 이탈).
+
+## 키워드 관리
+
+`keywords.py` — 브랜드 확정 목록 / 확장(어간×수식어 자동 생성) / 일반 목록.
+수정 후 push 만 하면 다음 런부터 반영된다.

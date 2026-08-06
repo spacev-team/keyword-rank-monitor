@@ -1,0 +1,33 @@
+name: Watchdog
+run-name: watchdog (n8n 트리거 감시)
+
+# n8n 이 유일한 방아쇠일 때의 SPOF 방어(EMM 과 동일 패턴): 26시간 내 'collect daily'
+# 실행 이력이 없으면(= n8n 미발화) 대신 실행 + 경고. '실행됐으나 실패'는 재실행 안 함.
+on:
+  schedule:
+    - cron: "0 1 * * *"   # 01:00 UTC = 10:00 KST (n8n daily 07:30 KST + 2.5h 여유)
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read   # gh workflow run 의 기본 브랜치 조회에 필요
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch daily if n8n missed it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CUTOFF=$(date -u -d "26 hours ago" +%Y-%m-%dT%H:%M:%SZ)
+          N=$(gh run list -R "${{ github.repository }}" --workflow collect.yml --limit 50 \
+              --json displayTitle,createdAt \
+              --jq "[.[] | select(.displayTitle == \"collect daily\" and .createdAt > \"$CUTOFF\")] | length")
+          if [ "$N" -eq 0 ]; then
+            echo "::warning::26시간 내 'collect daily' 실행 없음 — n8n 스케줄/PAT 점검 필요. 워치독이 대신 실행."
+            gh workflow run collect.yml -R "${{ github.repository }}" --ref main -f mode=daily
+          else
+            echo "OK: daily runs in window = $N"
+          fi

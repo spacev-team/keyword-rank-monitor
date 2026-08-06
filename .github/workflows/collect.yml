@@ -1,0 +1,110 @@
+name: Collect
+run-name: collect ${{ inputs.mode || 'core' }}
+
+# 트리거는 n8n(Schedule → workflow_dispatch API)이 전담 — EMM 과 동일 아키텍처.
+# cron 을 여기 두지 않는 이유: 이중 스케줄이면 같은 시각 런이 겹쳐 이력에 중복
+# 스냅샷이 쌓인다(추세 왜곡). n8n 장애 대비는 watchdog.yml(스테일 감지형)이 맡는다.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "daily(07:30 구글 포함 전체) | core(11:30/16:30/21:30 구글 제외) | probe(러너 IP 봇차단 점검 dry-run, 저장 없음)"
+        required: true
+        type: choice
+        options: [daily, core, probe]
+
+concurrency:
+  group: krm-collect
+  cancel-in-progress: false   # 동시 트리거는 취소 대신 직렬 대기
+
+permissions:
+  contents: write   # state 브랜치 push
+  pages: write      # Pages 배포
+  id-token: write   # actions/deploy-pages OIDC
+
+env:
+  TZ: Asia/Seoul    # '오늘'이 KST 기준 — UTC 러너 필수 보정
+  MODE: ${{ inputs.mode || 'core' }}
+
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90   # 240키워드 × 4~5엔진 순차(봇차단 회피 대기 포함) ≈ 45~60분
+    steps:
+      - uses: actions/checkout@v4
+
+      # 순위 이력(SQLite)은 state 브랜치에 단일 커밋으로 보존 — 러너는 매회 복원한다.
+      - name: Restore state (state branch -> data/)
+        run: |
+          if git fetch -q --depth 1 origin state; then
+            git checkout -q FETCH_HEAD -- data
+            ls -la data/
+          else
+            echo "no state branch yet (first run)"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # .env 는 시크릿 KRM_DOTENV 에서 복원(웹훅·SerpAPI 키 등). 미설정이어도 동작 —
+      # 알림 생략·구글 blocked 기록. tr -d '\r' = CRLF 시크릿 방어(EMM 07-07 실사고 교훈).
+      - name: Restore credentials (optional)
+        env:
+          DOTENV: ${{ secrets.KRM_DOTENV }}
+        run: |
+          if [ -n "$DOTENV" ]; then
+            printf '%s' "$DOTENV" | tr -d '\r' > .env
+            echo ".env restored ($(wc -l < .env) lines)"
+          else
+            echo "KRM_DOTENV 미설정 — 기본값으로 실행(알림·Sheets·SerpAPI 없음)"
+          fi
+
+      - name: Run collectors
+        id: collectors
+        run: |
+          case "$MODE" in
+            daily) python run.py --mode daily ;;
+            core)  python run.py --mode core ;;
+            probe) python run.py --engines naver,daum --keywords 삼삼엠투,단기임대 --dry-run ;;
+          esac
+
+      - name: Export dashboard data
+        if: ${{ !cancelled() && env.MODE != 'probe' }}
+        run: python export_dashboard.py
+
+      # 이력 DB 를 state 브랜치에 force-push(매회 단일 커밋 교체 — 히스토리 비대 없음).
+      - name: Persist state
+        if: ${{ !cancelled() && env.MODE != 'probe' }}
+        run: |
+          [ -f data/rank_history.sqlite ] || { echo "no state to persist"; exit 0; }
+          T=$(mktemp -d)
+          mkdir -p "$T/data"
+          cp data/rank_history.sqlite "$T/data/"
+          git -C "$T" init -qb state
+          git -C "$T" add -A
+          git -C "$T" -c user.name=krm-bot -c user.email=krm-bot@users.noreply.github.com \
+            commit -qm "state: $(date '+%F %T %Z') mode=$MODE"
+          git -C "$T" push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state:state
+
+      - name: Upload Pages artifact
+        if: ${{ !cancelled() && env.MODE != 'probe' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: collect
+    if: ${{ inputs.mode != 'probe' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
