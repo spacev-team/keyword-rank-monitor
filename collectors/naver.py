@@ -18,6 +18,11 @@
 - 브랜드검색/파워컨텐츠 블록은 내부 아이템 마크업이 해시 클래스라 분해가 취약하다
   → 블록 전체를 광고 유닛 1개로 취급하고 블록 원문에서 http(s) URL 을 긁어 판별.
 - 오가닉 섹션명은 헤더가 없는 블록이 많아(개별 웹문서 카드) 링크 호스트로 보완.
+- AI 브리핑 등 '결과가 아닌 SERP 피처' 블록은 오가닉 순번에서 제외한다(2026-08-06
+  사용자 리포트: 33M2 오가닉이 2위로 기록됐는데 실제 첫 결과는 자사 웹사이트 —
+  1번 자리를 AI 브리핑 답변 박스가 차지). 랭크트래커 관례상 답변박스·연관검색어류는
+  별도 피처이지 경쟁 '결과'가 아니며, 포함하면 피처 노출 여부에 따라 순위가 흔들려
+  추세 비교가 깨진다.
 """
 from __future__ import annotations
 
@@ -46,6 +51,9 @@ _HOST_SECTIONS = (
 
 _RAW_URL_RE = re.compile(r"https?://[^\"'\s\\]+")
 _ONCLICK_URL_RE = re.compile(r'urlencode\("(https?://[^"]+)"\)')
+
+# 오가닉 순번에서 제외하는 SERP 피처 블록 — 헤더 텍스트 접두 매칭
+_FEATURE_SECTIONS = ("AI 브리핑", "연관 검색어", "인기주제", "함께 많이 찾는")
 
 
 def _outer_blocks(main_pack) -> list:
@@ -155,7 +163,10 @@ class NaverRankCollector(BaseCollector):
             if _is_ad_block(blk):
                 ad_units.extend(_ad_units(blk))
             else:
-                organic.append((_organic_section(blk), blk))
+                section = _organic_section(blk)
+                if section.startswith(_FEATURE_SECTIONS):
+                    continue  # 답변박스·연관검색어류 — 결과 아님
+                organic.append((section, blk))
 
         return [self._rank_ad(kw, ad_units), self._rank_organic(kw, organic)]
 
