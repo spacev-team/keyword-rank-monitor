@@ -132,13 +132,21 @@ class DaumRankCollector(BaseCollector):
         return [self._scan_ads(kw, blocks), self._scan_organic(kw, blocks)]
 
     def _scan_ads(self, kw: str, blocks) -> RankRecord:
-        """상단+하단 모든 광고 유닛을 노출 순서대로 통합 순번."""
+        """프리미엄링크(카카오 키워드광고) 유닛만 노출 순서대로 순번.
+
+        다음 SERP 의 '파워링크' 섹션은 네이버 검색광고가 제휴 매체로 신디케이션된
+        영역이라 카카오 광고 성과와 무관 — 순위 팔로업 대상에서 제외(사용자 확정
+        2026-08-06). 스페셜링크 등 그 외 광고 섹션도 프리미엄링크가 아니므로 제외.
+        광고 유닛 0개 = no_section 은 이제 '프리미엄링크 영역 없음'을 뜻한다.
+        """
         rank = 0
         found: RankRecord | None = None
         for block in blocks:
             if not _is_ad_block(block):
                 continue
             section = _block_label(block)
+            if "프리미엄링크" not in section:
+                continue  # 파워링크(네이버 신디케이션)·스페셜링크 등
             for item in block.select("div.c-item-ad"):
                 a = item.select_one("strong.tit-g a[href]") or item.find("a", href=True)
                 if a is None:
