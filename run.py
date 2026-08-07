@@ -162,6 +162,13 @@ def main() -> int:
 
     if args.mode:
         keys = MODES[args.mode]
+        # 구글 요일 게이트(스케줄 모드 한정) — 브랜드 키워드는 구글 1~2위로
+        # 안정적이라 주 1회로 충분, API 크레딧을 아낀다(KRM_GOOGLE_DAYS 로 조정,
+        # 빈 값 = 매일). --engines 명시 실행은 게이트를 우회한다.
+        today = _dt.datetime.now(KST).strftime("%a").lower()
+        if "google" in keys and config.GOOGLE_DAYS and today not in config.GOOGLE_DAYS:
+            keys = [k for k in keys if k != "google"]
+            print(f"구글 수집 생략: 오늘({today}) ∉ KRM_GOOGLE_DAYS{sorted(config.GOOGLE_DAYS)}")
     elif args.engines:
         keys = [k.strip() for k in args.engines.split(",") if k.strip()]
         unknown = [k for k in keys if k not in REGISTRY]

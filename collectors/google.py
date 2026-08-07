@@ -59,10 +59,10 @@ class GoogleRankCollector(BaseCollector):
     def _collect_serper(self, keywords: list[str]) -> CollectResult:
         """Serper 는 광고를 반환하지 않는다 → organic 레코드만 낸다(ad 레코드를
         no_section 으로 내면 '광고 없음'과 '측정 불가'가 섞이므로 아예 생략).
-        num ≤ 10 이면 1크레딧, 초과는 2크레딧 — ORGANIC_SCAN_LIMIT 을 따른다.
+        num ≤ 10 이면 1크레딧, 초과는 2크레딧 — config.GOOGLE_API_NUM(기본 10).
         크레딧 소진/키 오류(402·403·429)는 잔여 키워드까지 같은 응답이 확실하므로
         전부 구분 기록하고 즉시 중단."""
-        num = min(config.ORGANIC_SCAN_LIMIT, 20)
+        num = config.GOOGLE_API_NUM
         records: list[RankRecord] = []
         for i, kw in enumerate(keywords):
             if i:

@@ -81,6 +81,14 @@ SERPER_KEY = env("SERPER_KEY")
 GOOGLE_KW_GROUPS = tuple(
     g.strip() for g in
     (env("KRM_GOOGLE_GROUPS", "brand,brand_ext,adhoc") or "").split(",") if g.strip())
+# 구글 수집 요일(KST, 소문자 3글자) — 브랜드 키워드는 구글에서 1~2위로 안정적이라
+# 주 1회면 추세 추적에 충분(2026-08-07 실측·사용자 비용 우려 반영). 빈 값 = 매일.
+GOOGLE_DAYS = frozenset(
+    d.strip().lower() for d in
+    (env("KRM_GOOGLE_DAYS", "mon") or "").split(",") if d.strip())
+# Serper 요청 결과 수 — 10 이하 = 1크레딧, 초과 = 2크레딧. 브랜드 키워드는
+# 상위 10 안이 정상이라 기본 10(크레딧 절반). 상위 20 스캔이 필요하면 20.
+GOOGLE_API_NUM = int(env("KRM_GOOGLE_NUM", "10") or 10)
 
 # ── 알림 임계값 ──────────────────────────────────────
 ALERT_ORGANIC_DROP = 5    # 오가닉 순위 N계단 이상 하락 시 알림

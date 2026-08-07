@@ -42,9 +42,11 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
   Custom Search JSON API 도 2026-01-20부터 신규 고객 차단(무료 경로 소멸). 실데이터 경로는
   ① `SERPAPI_KEY`(고가, 광고+오가닉) 또는 ② `SERPER_KEY`(Serper.dev — 가입 시 2,500쿼리
   무료, 이후 선불 크레딧). 둘 다 없으면 `blocked` 기록.
-- ⚠️ Serper 경로 제약: 크레딧 절약을 위해 구글만 브랜드 계열 키워드로 축소(`KRM_GOOGLE_GROUPS`,
-  기본 brand+brand_ext ≈ 69개 — 일반 171개는 네이버·다음에서만 측정). 광고 데이터 미제공
-  (organic 레코드만 기록). 크레딧: 결과 10개 요청 = 1, 20개 = 2 (`KRM_ORGANIC_LIMIT` 로 조절).
+- ⚠️ Serper 경로 제약: 크레딧 절약을 위해 구글만 브랜드 계열 키워드(`KRM_GOOGLE_GROUPS`,
+  기본 brand+brand_ext ≈ 69개 — 일반 171개는 네이버·다음에서만 측정) × **주 1회(월요일,
+  `KRM_GOOGLE_DAYS`)** 수집. 광고 데이터 미제공(organic 레코드만). 결과 수는 상위 10
+  (`KRM_GOOGLE_NUM`, 10 초과 시 크레딧 2배). 무료 2,500크레딧 ≈ 8개월, 소진 시
+  SerpAPI 무료 플랜(월 250 리셋)으로 전환 가능.
 - ⚠️ SERP 는 기기·지역·개인화로 달라짐 — 동일 방법론 반복 측정의 **추세 추적 프록시**.
 
 ## 로컬 실행 (개발·점검용)
