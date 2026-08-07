@@ -1,4 +1,4 @@
-"""구글 SERP 순위 수집기 — SerpAPI 우선, 직접 스크레이핑 폴백.
+"""구글 SERP 순위 수집기 — SerpAPI > 로컬 브라우저 인박스 > 직접 스크레이핑.
 
 구글은 2025년 1월부터 검색 결과에 JS 실행을 요구한다. requests 로 받으면
 UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경에서 실측 확인):
@@ -6,11 +6,18 @@ UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경�
   - 텍스트 브라우저 UA(Lynx/w3m)   → '더 이상 지원되지 않습니다'(200)
   - 구형 WAP UA                    → 403
   - 실제 Chromium(데이터센터 IP)   → 302 /sorry/ (reCAPTCHA)
-따라서 안정 경로는 SERPAPI_KEY 설정(SerpAPI 경유)이며, 직접 스크레이핑은
-거주지 IP 등 구글이 아직 HTML 을 주는 환경을 위한 폴백이다. 벽/캡차는 전부
-blocked 로 구분 기록해 '권외'와 섞이지 않게 한다.
+단, 거주지 IP + 실제 Chromium 은 정상 SERP 를 받는다(2026-08-07 실측: 광고
+블록·오가닉 모두 렌더링). 그래서 무료 경로는 로컬 PC 의 Playwright 수집
+(scripts/collect_google_local.py)이 google-serp 브랜치에 올린 JSON 인박스를
+Actions 러너가 소비하는 방식이다. 우선순위:
+  1) SERPAPI_KEY 설정          → SerpAPI 경유(유료, 무설정 시 생략)
+  2) 오늘자 인박스 JSON 존재    → 로컬 브라우저 수집 결과 사용
+  3) 직접 스크레이핑            → 데이터센터 IP 에선 사실상 전부 blocked 기록
+벽/캡차는 전부 blocked 로 구분 기록해 '권외'와 섞이지 않게 한다.
 """
 from __future__ import annotations
+
+import json
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,6 +29,7 @@ from collectors.base import (
     RankRecord,
     make_session,
     polite_sleep,
+    today_kst,
 )
 
 _SEARCH_URL = "https://www.google.com/search"
@@ -42,7 +50,22 @@ class GoogleRankCollector(BaseCollector):
     def collect(self, keywords: list[str]) -> CollectResult:
         if config.SERPAPI_KEY:
             return self._collect_serpapi(keywords)
+        inbox = _load_inbox()
+        if inbox is not None:
+            return self._collect_inbox(keywords, inbox)
         return self._collect_scrape(keywords)
+
+    # ── 로컬 브라우저 인박스 경로 ────────────────────
+    def _collect_inbox(self, keywords: list[str], inbox: dict) -> CollectResult:
+        by_kw: dict[str, list[RankRecord]] = {}
+        for d in inbox["records"]:
+            by_kw.setdefault(d["keyword"], []).append(RankRecord(**d))
+        records: list[RankRecord] = []
+        for kw in keywords:
+            # 로컬 런에 없던 키워드(목록 추가 직후 등)는 미수집으로 구분 기록
+            records += by_kw.get(kw) or _error_pair(kw, "inbox_missing_keyword")
+        return CollectResult(records, meta={
+            "path": "inbox", "generated_at": inbox.get("generated_at", "")})
 
     # ── SerpAPI 경로 ─────────────────────────────────
     def _collect_serpapi(self, keywords: list[str]) -> CollectResult:
@@ -125,30 +148,56 @@ def _fetch(session: requests.Session, kw: str) -> tuple[str, str, str]:
     return body, "", ""
 
 
+def _load_inbox() -> dict | None:
+    """오늘자(KST) 로컬 브라우저 수집 JSON — 없거나 낡았거나 깨졌으면 None.
+
+    낡은 인박스를 쓰지 않는 이유: 로컬 PC 가 꺼진 날 어제 순위가 오늘로
+    복제되면 추세가 조용히 오염된다. 그 날은 blocked 로 남는 게 정직하다.
+    """
+    path = config.GOOGLE_INBOX_PATH
+    if not path.exists():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if doc.get("date") != today_kst() or not isinstance(doc.get("records"), list):
+        return None
+    return doc
+
+
 # ── 스크레이핑 파서 ──────────────────────────────────
 def _parse_serp(kw: str, html: str) -> list[RankRecord]:
     soup = BeautifulSoup(html, "lxml")
 
     # 광고: 상단(#tads)·하단(#bottomads) 컨테이너를 노출 순서대로 통합 순번.
-    # 유닛 경계는 [data-text-ad](텍스트 광고 표준 속성), 없으면 컨테이너 직계 div.
+    # 유닛 경계: [data-text-ad](비-JS HTML 표준 속성) > a[data-pcu](JS 렌더링
+    # DOM — 광고당 정확히 1개, 값은 광고주 랜딩 URL 목록) > 컨테이너 직계 div.
     ad_rec = None
     ad_total = 0
     for cid, section in (("tads", "상단광고"), ("bottomads", "하단광고")):
         container = soup.find(id=cid)
         if container is None:
             continue
-        units = container.select("[data-text-ad]") or container.find_all(
-            "div", recursive=False)
+        units = (container.select("[data-text-ad]")
+                 or container.select("a[data-pcu]")
+                 or container.find_all("div", recursive=False))
         for unit in units:
-            a = unit.find("a", href=True)
-            if a is None:
-                continue
+            if unit.name == "a" and unit.has_attr("data-pcu"):
+                # 렌더링 DOM: 유닛 자신이 헤드라인 <a>. data-pcu 가 랜딩 URL 이라
+                # aclk 리다이렉트 해석 없이 자사 판별 가능.
+                href = f"{unit['data-pcu']} {unit.get('href', '')}"
+            else:
+                a = unit.find("a", href=True)
+                if a is None:
+                    continue
+                # 광고 href 는 googleadservices 리다이렉트여도 목적지 도메인이
+                # 쿼리에 포함되므로 is_self_url 의 서브스트링 매칭으로 잡힌다.
+                href = a["href"]
             ad_total += 1
-            # 광고 href 는 googleadservices 리다이렉트여도 목적지 도메인이
-            # 쿼리에 포함되므로 is_self_url 의 서브스트링 매칭으로 잡힌다.
-            if ad_rec is None and config.is_self_url(a["href"]):
+            if ad_rec is None and config.is_self_url(href):
                 ad_rec = RankRecord("google", "ad", kw, ad_total, 0,
-                                    section=section, matched=a["href"][:200])
+                                    section=section, matched=href[:200])
     if ad_rec is not None:
         ad_rec.total = ad_total
     elif ad_total:

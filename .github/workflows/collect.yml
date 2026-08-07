@@ -1,14 +1,19 @@
 name: Collect
-run-name: collect ${{ inputs.mode || 'core' }}
+run-name: collect ${{ inputs.mode || 'scheduled' }}
 
-# 트리거는 n8n(Schedule → workflow_dispatch API)이 전담 — EMM 과 동일 아키텍처.
-# cron 을 여기 두지 않는 이유: 이중 스케줄이면 같은 시각 런이 겹쳐 이력에 중복
-# 스냅샷이 쌓인다(추세 왜곡). n8n 장애 대비는 watchdog.yml(스테일 감지형)이 맡는다.
+# 스케줄 = cron 내장(토큰 제로 운영, 사용자 확정 2026-08-06). 원래 EMM 처럼 n8n →
+# workflow_dispatch 구조였으나 org PAT 승인 대기 + 개인 토큰 과권한 문제로 전환.
+# 이 프로젝트는 런마다 독립 스냅샷(run_id)이라 트리거 중복이 무해해 EMM 의
+# 'cron 금지(중복 적재)' 원칙이 적용되지 않는다. GitHub cron 은 5~20분 지연될 수
+# 있음(추세 프록시 용도라 허용). 분값 37 = 정시/30분 혼잡 회피(지연 완화).
 on:
+  schedule:
+    - cron: "37 22 * * *"      # 07:37 KST — daily(구글 포함 전체)
+    - cron: "37 2,7,12 * * *"  # 11:37/16:37/21:37 KST — core(구글 제외)
   workflow_dispatch:
     inputs:
       mode:
-        description: "daily(07:30 구글 포함 전체) | core(11:30/16:30/21:30 구글 제외) | probe(러너 IP 봇차단 점검 dry-run, 저장 없음)"
+        description: "daily(구글 포함 전체) | core(구글 제외) | probe(러너 IP 봇차단 점검 dry-run, 저장 없음)"
         required: true
         type: choice
         options: [daily, core, probe]
@@ -24,13 +29,25 @@ permissions:
 
 env:
   TZ: Asia/Seoul    # '오늘'이 KST 기준 — UTC 러너 필수 보정
-  MODE: ${{ inputs.mode || 'core' }}
 
 jobs:
   collect:
     runs-on: ubuntu-24.04
     timeout-minutes: 90   # 240키워드 × 4~5엔진 순차(봇차단 회피 대기 포함) ≈ 45~60분
     steps:
+      # schedule 이벤트는 inputs 가 없다 — cron 시각(UTC 22시대 = daily)으로 모드 결정.
+      - name: Resolve mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"
+          elif [ "$(date -u +%H)" = "22" ]; then
+            MODE=daily
+          else
+            MODE=core
+          fi
+          echo "MODE=$MODE" >> "$GITHUB_ENV"
+          echo "mode=$MODE"
+
       - uses: actions/checkout@v4
 
       # 순위 이력(SQLite)은 state 브랜치에 단일 커밋으로 보존 — 러너는 매회 복원한다.
@@ -41,6 +58,18 @@ jobs:
             ls -la data/
           else
             echo "no state branch yet (first run)"
+          fi
+
+      # 구글 인박스: 로컬 PC(거주지 IP) 브라우저 수집 결과. daily 런만 소비하며,
+      # 브랜치/파일이 없거나 낡았으면 수집기가 알아서 blocked 로 강등한다.
+      - name: Restore google inbox (google-serp branch -> data/)
+        if: ${{ env.MODE == 'daily' }}
+        run: |
+          if git fetch -q --depth 1 origin google-serp; then
+            git checkout -q FETCH_HEAD -- data/google_serp.json || echo "inbox 파일 없음"
+            ls -la data/ || true
+          else
+            echo "no google-serp branch — SERPAPI_KEY 미설정이면 구글은 blocked 기록"
           fi
 
       - uses: actions/setup-python@v5

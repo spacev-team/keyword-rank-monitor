@@ -6,20 +6,22 @@
 
 **대시보드**: https://spacev-team.github.io/keyword-rank-monitor/ (매 수집 런 종료 시 자동 갱신)
 
-## 아키텍처 (external-metrics-monitor 와 동일 패턴)
+## 아키텍처
 
 ```
-n8n(스케줄) → GitHub workflow_dispatch → Actions 러너(수집)
-                                          ├─ state 브랜치: data/rank_history.sqlite (전체 이력)
-                                          └─ GitHub Pages: docs/ 대시보드 + data/*.json
+GitHub Actions cron(스케줄 내장) → 러너(수집)
+                                   ├─ state 브랜치: data/rank_history.sqlite (전체 이력)
+                                   └─ GitHub Pages: docs/ 대시보드 + data/*.json
 ```
+
+토큰·외부 스케줄러 없이 repo 단독으로 동작한다(cron 채택 경위는 [`ops/scheduling.md`](ops/scheduling.md)).
 
 | 스케줄(KST) | mode | 엔진 |
 |---|---|---|
-| 07:30 | `daily` | 네이버·**구글**·다음·플레이·앱스토어 (구글은 하루 1회만) |
-| 11:30 / 16:30 / 21:30 | `core` | 구글 제외 4개 엔진 |
+| 07:37 | `daily` | 네이버·**구글**·다음·플레이·앱스토어 (구글은 하루 1회만) |
+| 11:37 / 16:37 / 21:37 | `core` | 구글 제외 4개 엔진 |
 
-n8n 설정·운영 절차는 [`ops/n8n-scheduling.md`](ops/n8n-scheduling.md).
+GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/scheduling.md`](ops/scheduling.md).
 
 ## 측정 정의
 
@@ -51,7 +53,7 @@ python run.py --export-csv out.csv          # 이력 CSV(엑셀 호환 BOM)
 python export_dashboard.py                  # docs/data/*.json 재생성
 ```
 
-로컬 폴백 스케줄러(`scripts/register_tasks.ps1`)는 n8n 운영 중 **활성화 금지**(이중 수집).
+수집은 Actions cron 이 전담한다 — 로컬 실행은 점검·개발용(로컬 SQLite 에만 기록되고 운영 이력과 섞이지 않음).
 
 ## 저장
 

@@ -72,6 +72,8 @@ SHEET_ID = env("KRM_SHEET_ID")                       # 미설정 시 Sheets 적�
 SERVICE_ACCOUNT = env("GOOGLE_APPLICATION_CREDENTIALS", "./secrets/service-account.json")
 GOOGLE_CHAT_WEBHOOK_URL = env("KRM_GOOGLE_CHAT_WEBHOOK_URL") or env("GOOGLE_CHAT_WEBHOOK_URL")
 SERPAPI_KEY = env("SERPAPI_KEY")                     # 설정 시 구글 수집이 SerpAPI 경유(차단 회피)
+GOOGLE_INBOX_PATH = Path(env("KRM_GOOGLE_INBOX") or _ROOT / "data" / "google_serp.json")
+                                                     # 로컬 브라우저 수집 결과(JSON) — SERPAPI_KEY 없을 때 2순위 경로
 
 # ── 알림 임계값 ──────────────────────────────────────
 ALERT_ORGANIC_DROP = 5    # 오가닉 순위 N계단 이상 하락 시 알림
