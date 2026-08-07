@@ -12,11 +12,12 @@ UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경�
 → 저가 경로는 Serper.dev(가입 시 2,500쿼리 무료, 이후 선불 크레딧). 크레딧
 절약을 위해 구글 수집 키워드를 브랜드 계열로 좁힌다(그룹 필터는 run.py,
 config.GOOGLE_KW_GROUPS). 우선순위:
-  1) SERPAPI_KEY   → SerpAPI 경유(고가, 광고+오가닉 전부)
-  2) SERPER_KEY    → Serper.dev 경유(저가, 실 SERP 오가닉만 — 광고 미제공이라
-     organic 레코드만 기록. 결과 수 10 초과 요청은 크레딧 2배)
+  1) SERPAPI_KEY   → SerpAPI 경유(고가)
+  2) SERPER_KEY    → Serper.dev 경유(저가, 결과 수 10 초과 요청은 크레딧 2배)
   3) 직접 스크레이핑 → 데이터센터 IP 에선 사실상 전부 blocked 기록
-벽/캡차는 전부 blocked 로 구분 기록해 '권외'와 섞이지 않게 한다.
+구글은 organic 만 측정한다 — 광고는 유료 SerpAPI 없이 측정 불가라 프로젝트에서
+제외(사용자 확정 2026-08-07). 벽/캡차는 전부 blocked 로 구분 기록해 '미노출'과
+섞이지 않게 한다.
 """
 from __future__ import annotations
 
@@ -57,8 +58,7 @@ class GoogleRankCollector(BaseCollector):
 
     # ── Serper.dev 경로 ──────────────────────────────
     def _collect_serper(self, keywords: list[str]) -> CollectResult:
-        """Serper 는 광고를 반환하지 않는다 → organic 레코드만 낸다(ad 레코드를
-        no_section 으로 내면 '광고 없음'과 '측정 불가'가 섞이므로 아예 생략).
+        """구글은 organic 만 측정(광고 제외 — 모듈 도킹스트링 참고).
         num ≤ 10 이면 1크레딧, 초과는 2크레딧 — config.GOOGLE_API_NUM(기본 10).
         크레딧 소진/키 오류(402·403·429)는 잔여 키워드까지 같은 응답이 확실하므로
         전부 구분 기록하고 즉시 중단."""
@@ -99,13 +99,12 @@ class GoogleRankCollector(BaseCollector):
                 }, timeout=config.REQUEST_TIMEOUT)
                 data = r.json()
             except Exception as e:  # noqa: BLE001 — 키워드 단위로 격리
-                records += _error_pair(kw, f"serpapi: {e}")
+                records.append(_error_organic(kw, f"serpapi: {e}"))
                 continue
             if r.status_code != 200 or "error" in data:
-                records += _error_pair(kw, f"serpapi {r.status_code}: {data.get('error', '')}")
+                records.append(_error_organic(kw, f"serpapi {r.status_code}: {data.get('error', '')}"))
                 continue
-            records.append(_rank_serpapi_ads(kw, data.get("ads") or []))
-            records.append(_rank_serpapi_organic(kw, data.get("organic_results") or []))
+            records.append(_rank_api_organic(kw, data.get("organic_results") or []))
         return CollectResult(records, meta={"path": "serpapi"})
 
     # ── 직접 스크레이핑 경로 ─────────────────────────
@@ -124,19 +123,19 @@ class GoogleRankCollector(BaseCollector):
                 polite_sleep(config.GOOGLE_SLEEP_BASE)
             html, block_detail, err = _fetch(session, kw)
             if err:
-                records += _error_pair(kw, err)
+                records.append(_error_organic(kw, err))
                 continue
             if block_detail:
                 consecutive_blocks += 1
-                records += _blocked_pair(kw, block_detail)
+                records.append(_blocked_organic(kw, block_detail))
                 if consecutive_blocks >= config.GOOGLE_BLOCK_ABORT:
                     # 차단이 이어지면 재시도할수록 IP 평판만 나빠진다 → 조기 종료
                     for rest in keywords[i + 1:]:
-                        records += _blocked_pair(rest, "aborted")
+                        records.append(_blocked_organic(rest, "aborted"))
                     break
                 continue
             consecutive_blocks = 0
-            records += _parse_serp(kw, html)
+            records.append(_parse_serp_organic(kw, html))
         return CollectResult(records, meta={"path": "scrape"})
 
 
@@ -172,7 +171,8 @@ def _error_organic(kw: str, detail: str) -> RankRecord:
 
 
 def _rank_api_organic(kw: str, items: list[dict]) -> RankRecord:
-    """API(Serper) organic 목록은 노출 순서 그대로 — 자사 첫 매칭 순번이 순위."""
+    """API(Serper/SerpAPI) organic 목록은 노출 순서 그대로 — 자사 첫 매칭 순번이 순위."""
+    items = items[:config.ORGANIC_SCAN_LIMIT]
     if not items:
         return RankRecord("google", "organic", kw, None, 0, status="not_found")
     for i, item in enumerate(items, 1):
@@ -183,44 +183,8 @@ def _rank_api_organic(kw: str, items: list[dict]) -> RankRecord:
 
 
 # ── 스크레이핑 파서 ──────────────────────────────────
-def _parse_serp(kw: str, html: str) -> list[RankRecord]:
+def _parse_serp_organic(kw: str, html: str) -> RankRecord:
     soup = BeautifulSoup(html, "lxml")
-
-    # 광고: 상단(#tads)·하단(#bottomads) 컨테이너를 노출 순서대로 통합 순번.
-    # 유닛 경계: [data-text-ad](비-JS HTML 표준 속성) > a[data-pcu](JS 렌더링
-    # DOM — 광고당 정확히 1개, 값은 광고주 랜딩 URL 목록) > 컨테이너 직계 div.
-    ad_rec = None
-    ad_total = 0
-    for cid, section in (("tads", "상단광고"), ("bottomads", "하단광고")):
-        container = soup.find(id=cid)
-        if container is None:
-            continue
-        units = (container.select("[data-text-ad]")
-                 or container.select("a[data-pcu]")
-                 or container.find_all("div", recursive=False))
-        for unit in units:
-            if unit.name == "a" and unit.has_attr("data-pcu"):
-                # 렌더링 DOM: 유닛 자신이 헤드라인 <a>. data-pcu 가 랜딩 URL 이라
-                # aclk 리다이렉트 해석 없이 자사 판별 가능.
-                href = f"{unit['data-pcu']} {unit.get('href', '')}"
-            else:
-                a = unit.find("a", href=True)
-                if a is None:
-                    continue
-                # 광고 href 는 googleadservices 리다이렉트여도 목적지 도메인이
-                # 쿼리에 포함되므로 is_self_url 의 서브스트링 매칭으로 잡힌다.
-                href = a["href"]
-            ad_total += 1
-            if ad_rec is None and config.is_self_url(href):
-                ad_rec = RankRecord("google", "ad", kw, ad_total, 0,
-                                    section=section, matched=href[:200])
-    if ad_rec is not None:
-        ad_rec.total = ad_total
-    elif ad_total:
-        ad_rec = RankRecord("google", "ad", kw, None, ad_total, status="not_found")
-    else:
-        ad_rec = RankRecord("google", "ad", kw, None, 0, status="no_section")
-
     # 오가닉: h3 를 가진 결과 블록의 첫 <a>. h3 는 <a> 안쪽에 있는 게 기본형이라
     # find_parent 우선, 변형 대비 형제 탐색 폴백. 광고 컨테이너 내부는 제외.
     org_rec = None
@@ -244,45 +208,14 @@ def _parse_serp(kw: str, html: str) -> list[RankRecord]:
             break
     if org_rec is not None:
         org_rec.total = org_total
-    elif org_total:
-        org_rec = RankRecord("google", "organic", kw, None, org_total,
-                             status="not_found")
-    else:
-        # 200 인데 결과 블록 0개 = 구조 변경 의심(벽 페이지는 위에서 걸렀다)
-        org_rec = RankRecord("google", "organic", kw, None, 0, status="parse_fail")
-    return [ad_rec, org_rec]
-
-
-# ── SerpAPI 파서 ─────────────────────────────────────
-def _rank_serpapi_ads(kw: str, ads: list[dict]) -> RankRecord:
-    if not ads:
-        return RankRecord("google", "ad", kw, None, 0, status="no_section")
-    for i, ad in enumerate(ads, 1):  # SerpAPI 는 상단→하단 노출 순서로 준다
-        url = ad.get("link") or ad.get("tracking_link") or ""
-        if config.is_self_url(url) or config.is_self_url(ad.get("displayed_link", "")):
-            section = "하단광고" if ad.get("block_position") == "bottom" else "상단광고"
-            return RankRecord("google", "ad", kw, i, len(ads),
-                              section=section, matched=url[:200])
-    return RankRecord("google", "ad", kw, None, len(ads), status="not_found")
-
-
-def _rank_serpapi_organic(kw: str, results: list[dict]) -> RankRecord:
-    results = results[:config.ORGANIC_SCAN_LIMIT]
-    if not results:
-        return RankRecord("google", "organic", kw, None, 0, status="parse_fail")
-    for i, item in enumerate(results, 1):
-        if config.is_self_url(item.get("link", "")):
-            return RankRecord("google", "organic", kw, i, len(results),
-                              section="웹결과", matched=item.get("link", "")[:200])
-    return RankRecord("google", "organic", kw, None, len(results), status="not_found")
+        return org_rec
+    if org_total:
+        return RankRecord("google", "organic", kw, None, org_total,
+                          status="not_found")
+    # 200 인데 결과 블록 0개 = 구조 변경 의심(벽 페이지는 위에서 걸렀다)
+    return RankRecord("google", "organic", kw, None, 0, status="parse_fail")
 
 
 # ── 공용 레코드 헬퍼 ─────────────────────────────────
-def _blocked_pair(kw: str, detail: str) -> list[RankRecord]:
-    return [RankRecord("google", area, kw, None, 0, status="blocked", detail=detail)
-            for area in ("ad", "organic")]
-
-
-def _error_pair(kw: str, detail: str) -> list[RankRecord]:
-    return [RankRecord("google", area, kw, None, 0, status="error", detail=detail)
-            for area in ("ad", "organic")]
+def _blocked_organic(kw: str, detail: str) -> RankRecord:
+    return RankRecord("google", "organic", kw, None, 0, status="blocked", detail=detail)
