@@ -29,7 +29,7 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 |---|---|---|---|
 | naver | ad | PC 통합검색 HTML 파싱 | 파워링크·브랜드검색 광고 유닛(상단+하단 통합) 중 자사 순번 |
 | naver | organic | 〃 | 광고 제외 결과 블록 DOM 순서 중 자사 첫 매칭(섹션명 기록) |
-| google | ad / organic | SerpAPI(유료) → Custom Search API(무료) → 직접 파싱 순 | 상동 (CSE 경로는 organic 상위 10만) |
+| google | ad / organic | SerpAPI(고가) → Serper.dev(저가) → 직접 파싱 순 | 상동 (Serper 경로는 organic 만) |
 | daum | ad / organic | 통합검색 HTML 파싱 | 프리미엄링크 / 오가닉 블록 |
 | playstore | app | google_play_scraper.search (상위 30) | 검색 결과 중 자사 앱 순번 |
 | appstore | app | iTunes Search API (상위 200) | 상동 |
@@ -38,12 +38,13 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 - `rank=NULL` 은 `status` 로 구분: `not_found`(정상 파싱, 미노출) / `no_section`(광고 영역
   없음) / `blocked`(봇 차단) / `parse_fail`(SERP 구조 변경 의심) / `error`(네트워크 등).
   → **권외와 수집 실패를 절대 섞지 않는다.**
-- ⚠️ 구글은 2025-01부터 검색에 JS 필수 → 데이터센터 IP 직접 스크레이핑 불가. 실데이터 경로는
-  ① `SERPAPI_KEY`(유료, 광고+오가닉) 또는 ② `GOOGLE_CSE_KEY`+`GOOGLE_CSE_CX`(구글 공식
-  Custom Search API, **무료 일 100쿼리**). 둘 다 없으면 `blocked` 기록.
-- ⚠️ CSE 경로 제약: 무료 쿼터 때문에 구글만 브랜드 계열 키워드로 축소(`KRM_GOOGLE_GROUPS`,
-  기본 brand+brand_ext ≈ 69개 — 일반 171개는 네이버·다음에서만 측정). 광고 순위 측정 불가
-  (organic 레코드만 기록), 순위는 실 SERP 근사치(개인화·유니버설 결과 제외).
+- ⚠️ 구글은 2025-01부터 검색에 JS 필수 → 데이터센터 IP 직접 스크레이핑 불가. 구글 공식
+  Custom Search JSON API 도 2026-01-20부터 신규 고객 차단(무료 경로 소멸). 실데이터 경로는
+  ① `SERPAPI_KEY`(고가, 광고+오가닉) 또는 ② `SERPER_KEY`(Serper.dev — 가입 시 2,500쿼리
+  무료, 이후 선불 크레딧). 둘 다 없으면 `blocked` 기록.
+- ⚠️ Serper 경로 제약: 크레딧 절약을 위해 구글만 브랜드 계열 키워드로 축소(`KRM_GOOGLE_GROUPS`,
+  기본 brand+brand_ext ≈ 69개 — 일반 171개는 네이버·다음에서만 측정). 광고 데이터 미제공
+  (organic 레코드만 기록). 크레딧: 결과 10개 요청 = 1, 20개 = 2 (`KRM_ORGANIC_LIMIT` 로 조절).
 - ⚠️ SERP 는 기기·지역·개인화로 달라짐 — 동일 방법론 반복 측정의 **추세 추적 프록시**.
 
 ## 로컬 실행 (개발·점검용)

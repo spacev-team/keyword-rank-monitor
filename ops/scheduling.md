@@ -25,7 +25,7 @@
 |---|---|
 | 수동 실행 | GitHub → Actions → Collect → Run workflow (mode 선택). `probe` = 네이버·다음 2키워드 dry-run(저장 없음) — 러너 IP 봇차단 점검용 |
 | 시각 변경 | `collect.yml` 의 cron 수정 → push (UTC 기준임에 주의: KST−9h) |
-| 웹훅·구글 API 키 설정 | 로컬 `.env` 작성 → `gh secret set KRM_DOTENV -R spacev-team/keyword-rank-monitor < .env` |
+| 웹훅·Serper 키 설정 | 로컬 `.env` 작성 → `gh secret set KRM_DOTENV -R spacev-team/keyword-rank-monitor < .env` |
 | 수집 실패 | Actions 런 로그 확인 → Run workflow 재실행(런 = 독립 스냅샷이라 재실행 무해) |
 | 이력 확인 | state 브랜치 `data/rank_history.sqlite`. 로컬: `python run.py --export-csv out.csv` |
 | 대시보드 | https://spacev-team.github.io/keyword-rank-monitor/ (매 런 + docs 변경 push 시 자동 재배포) |
@@ -33,13 +33,13 @@
 ## 알려진 리스크
 
 - **구글**: 2025-01부터 검색에 JS 필수 → 러너(데이터센터 IP)에선 직접 스크레이핑 불가
-  (실제 브라우저여도 reCAPTCHA — 거주지 IP 로컬 수집안은 상시 가동 PC 가 필요해 기각,
-  2026-08-07 사용자 확정: 100% 클라우드). 실데이터 경로:
-  ① `KRM_DOTENV` 의 `SERPAPI_KEY`(유료, 광고+오가닉 전부) 또는
-  ② `GOOGLE_CSE_KEY`+`GOOGLE_CSE_CX`(구글 공식 Custom Search JSON API, 무료 일 100쿼리 —
-  브랜드 계열 ≈ 69개만 수집, 광고 미측정, 순위는 근사치). 둘 다 없으면 `blocked` 기록,
-  대시보드에 '차단/미설정' 표시. CSE 발급: Cloud Console 에서 Custom Search API 활성화 +
-  API 키, https://programmablesearchengine.google.com 에서 '전체 웹 검색' 엔진 생성(cx).
+  (실제 브라우저여도 reCAPTCHA — 거주지 IP 로컬 수집안은 상시 가동 PC 필요로 기각,
+  2026-08-07 사용자 확정: 100% 클라우드). 구글 공식 Custom Search JSON API 는 2026-01-20
+  신규 고객 차단(403 실측 + 공식 문서) — 완전 무료 경로 소멸. 실데이터 경로:
+  ① `KRM_DOTENV` 의 `SERPAPI_KEY`(고가, 광고+오가닉 전부) 또는
+  ② `SERPER_KEY`(https://serper.dev — 가입 시 2,500쿼리 무료(카드 불필요), 이후 $50 선불
+  50,000크레딧. 브랜드 계열 ≈ 69개/일 × 2크레딧(상위 20) 기준 무료분 ≈ 2.5주, $50 ≈ 1년).
+  둘 다 없으면 `blocked` 기록, 대시보드에 '차단/미설정' 표시. 광고 순위는 Serper 미제공.
 - **러너 IP 봇차단(네이버)**: 러너 IP 복불복로 간헐 차단(2026-08-06 실측). 수집기가 쿨다운
   재시도 후 조기 중단하고, 대시보드는 엔진별 '마지막 정상 런'을 보여주므로 자가 회복된다.
 - **repo 공개**: org free 플랜에서 Pages 는 public repo 필수 → 키워드 목록·순위 데이터 공개.

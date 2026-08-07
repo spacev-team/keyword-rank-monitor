@@ -1,4 +1,4 @@
-"""구글 SERP 순위 수집기 — SerpAPI > Custom Search API(무료) > 직접 스크레이핑.
+"""구글 SERP 순위 수집기 — SerpAPI > Serper.dev > 직접 스크레이핑.
 
 구글은 2025년 1월부터 검색 결과에 JS 실행을 요구한다. requests 로 받으면
 UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경에서 실측 확인):
@@ -7,13 +7,15 @@ UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경�
   - 구형 WAP UA                    → 403
   - 실제 Chromium(데이터센터 IP)   → 302 /sorry/ (reCAPTCHA)
 거주지 IP + 실제 브라우저는 통하지만(2026-08-07 실측) 상시 켜진 로컬 머신이
-필요해 기각(사용자 확정 2026-08-07: 100% 클라우드). 무료 경로는 구글 공식
-Custom Search JSON API — 일 100쿼리 무료라 브랜드 계열 키워드로 좁혀 쓴다
-(그룹 필터는 run.py, config.GOOGLE_KW_GROUPS). 우선순위:
-  1) SERPAPI_KEY                → SerpAPI 경유(유료, 광고+오가닉 전부)
-  2) GOOGLE_CSE_KEY + CX        → CSE 경유(무료, 오가닉 상위 10만·광고 측정
-     불가 → organic 레코드만 기록, 순위는 실 SERP 근사치)
-  3) 직접 스크레이핑            → 데이터센터 IP 에선 사실상 전부 blocked 기록
+필요해 기각(사용자 확정: 100% 클라우드). 구글 공식 Custom Search JSON API 는
+2026-01-20부터 신규 고객 차단(403 실측 + 공식 문서, 2027-01-01 서비스 종료)
+→ 저가 경로는 Serper.dev(가입 시 2,500쿼리 무료, 이후 선불 크레딧). 크레딧
+절약을 위해 구글 수집 키워드를 브랜드 계열로 좁힌다(그룹 필터는 run.py,
+config.GOOGLE_KW_GROUPS). 우선순위:
+  1) SERPAPI_KEY   → SerpAPI 경유(고가, 광고+오가닉 전부)
+  2) SERPER_KEY    → Serper.dev 경유(저가, 실 SERP 오가닉만 — 광고 미제공이라
+     organic 레코드만 기록. 결과 수 10 초과 요청은 크레딧 2배)
+  3) 직접 스크레이핑 → 데이터센터 IP 에선 사실상 전부 blocked 기록
 벽/캡차는 전부 blocked 로 구분 기록해 '권외'와 섞이지 않게 한다.
 """
 from __future__ import annotations
@@ -32,7 +34,7 @@ from collectors.base import (
 
 _SEARCH_URL = "https://www.google.com/search"
 _SERPAPI_URL = "https://serpapi.com/search"
-_CSE_URL = "https://www.googleapis.com/customsearch/v1"
+_SERPER_URL = "https://google.serper.dev/search"
 
 # 차단/벽 페이지 실측 마커 (2026-08 덤프 기준).
 #   /sorry/ 캡차 페이지: URL 에 /sorry/, 본문에 recaptcha·'비정상적인 트래픽'
@@ -49,38 +51,40 @@ class GoogleRankCollector(BaseCollector):
     def collect(self, keywords: list[str]) -> CollectResult:
         if config.SERPAPI_KEY:
             return self._collect_serpapi(keywords)
-        if config.GOOGLE_CSE_KEY and config.GOOGLE_CSE_CX:
-            return self._collect_cse(keywords)
+        if config.SERPER_KEY:
+            return self._collect_serper(keywords)
         return self._collect_scrape(keywords)
 
-    # ── Custom Search API 경로(무료) ─────────────────
-    def _collect_cse(self, keywords: list[str]) -> CollectResult:
-        """CSE 는 광고를 반환하지 않는다 → organic 레코드만 낸다(ad 레코드를
+    # ── Serper.dev 경로 ──────────────────────────────
+    def _collect_serper(self, keywords: list[str]) -> CollectResult:
+        """Serper 는 광고를 반환하지 않는다 → organic 레코드만 낸다(ad 레코드를
         no_section 으로 내면 '광고 없음'과 '측정 불가'가 섞이므로 아예 생략).
-        무료 쿼터(일 100) 소진 시 남은 키워드는 error(cse_quota) 로 구분 기록."""
+        num ≤ 10 이면 1크레딧, 초과는 2크레딧 — ORGANIC_SCAN_LIMIT 을 따른다.
+        크레딧 소진/키 오류(402·403·429)는 잔여 키워드까지 같은 응답이 확실하므로
+        전부 구분 기록하고 즉시 중단."""
+        num = min(config.ORGANIC_SCAN_LIMIT, 20)
         records: list[RankRecord] = []
         for i, kw in enumerate(keywords):
             if i:
                 polite_sleep(1.0)  # API 호출은 차단 위험이 없어 짧게만 쉰다
             try:
-                r = requests.get(_CSE_URL, params={
-                    "key": config.GOOGLE_CSE_KEY, "cx": config.GOOGLE_CSE_CX,
-                    "q": kw, "gl": "kr", "hl": "ko", "num": "10",
-                }, timeout=config.REQUEST_TIMEOUT)
+                r = requests.post(
+                    _SERPER_URL,
+                    headers={"X-API-KEY": config.SERPER_KEY},
+                    json={"q": kw, "gl": "kr", "hl": "ko", "num": num},
+                    timeout=config.REQUEST_TIMEOUT)
             except Exception as e:  # noqa: BLE001 — 키워드 단위로 격리
-                records.append(_error_organic(kw, f"cse: {e}"))
+                records.append(_error_organic(kw, f"serper: {e}"))
                 continue
-            if r.status_code in (403, 429):
-                # 쿼터 소진(dailyLimitExceeded/rateLimitExceeded) — 더 던져봐야
-                # 같은 응답이므로 남은 키워드 전부 구분 기록하고 중단.
-                detail = f"cse_quota {r.status_code}"
+            if r.status_code in (402, 403, 429):
+                detail = f"serper_quota {r.status_code}"
                 records += [_error_organic(k, detail) for k in keywords[i:]]
                 break
             if r.status_code != 200:
-                records.append(_error_organic(kw, f"cse http {r.status_code}"))
+                records.append(_error_organic(kw, f"serper http {r.status_code}"))
                 continue
-            records.append(_rank_cse_organic(kw, r.json().get("items") or []))
-        return CollectResult(records, meta={"path": "cse"})
+            records.append(_rank_api_organic(kw, r.json().get("organic") or []))
+        return CollectResult(records, meta={"path": "serper"})
 
     # ── SerpAPI 경로 ─────────────────────────────────
     def _collect_serpapi(self, keywords: list[str]) -> CollectResult:
@@ -167,8 +171,8 @@ def _error_organic(kw: str, detail: str) -> RankRecord:
     return RankRecord("google", "organic", kw, None, 0, status="error", detail=detail)
 
 
-def _rank_cse_organic(kw: str, items: list[dict]) -> RankRecord:
-    """CSE items 는 노출 순서 그대로 — 자사 첫 매칭 순번이 순위(상위 10 한정)."""
+def _rank_api_organic(kw: str, items: list[dict]) -> RankRecord:
+    """API(Serper) organic 목록은 노출 순서 그대로 — 자사 첫 매칭 순번이 순위."""
     if not items:
         return RankRecord("google", "organic", kw, None, 0, status="not_found")
     for i, item in enumerate(items, 1):

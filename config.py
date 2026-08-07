@@ -73,11 +73,11 @@ SERVICE_ACCOUNT = env("GOOGLE_APPLICATION_CREDENTIALS", "./secrets/service-accou
 GOOGLE_CHAT_WEBHOOK_URL = env("KRM_GOOGLE_CHAT_WEBHOOK_URL") or env("GOOGLE_CHAT_WEBHOOK_URL")
 SERPAPI_KEY = env("SERPAPI_KEY")                     # 설정 시 구글 수집이 SerpAPI 경유(차단 회피)
 
-# Google Custom Search JSON API(무료 100쿼리/일) — SERPAPI_KEY 없을 때 2순위.
-# 무료 한도 때문에 구글 수집 키워드를 브랜드 계열로 좁힌다(아래 그룹 필터,
+# Serper.dev(실 SERP JSON, 가입 시 2,500쿼리 무료 → 선불 크레딧) — SERPAPI_KEY
+# 없을 때 2순위. 구글 공식 CSE JSON API 는 2026-01-20 신규 고객 차단으로 불가.
+# 크레딧 절약을 위해 구글 수집 키워드를 브랜드 계열로 좁힌다(아래 그룹 필터,
 # 사용자 확정 2026-08-07). adhoc = --keywords 임시 실행도 통과시키기 위함.
-GOOGLE_CSE_KEY = env("GOOGLE_CSE_KEY")
-GOOGLE_CSE_CX = env("GOOGLE_CSE_CX")
+SERPER_KEY = env("SERPER_KEY")
 GOOGLE_KW_GROUPS = tuple(
     g.strip() for g in
     (env("KRM_GOOGLE_GROUPS", "brand,brand_ext,adhoc") or "").split(",") if g.strip())
