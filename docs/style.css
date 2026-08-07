@@ -218,6 +218,17 @@ td.time { color: var(--muted); font-size: 0.82rem; }
   font-size: 0.8rem;
   line-height: 1.6;
 }
+.stale-tag {
+  margin-left: auto;
+  margin-right: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--warn);
+  background: #FCEEDD;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
 .rank-none.s-parse_fail, .rank-none.s-error { color: var(--err); }
 
 .delta-up { color: var(--up); font-weight: 600; }

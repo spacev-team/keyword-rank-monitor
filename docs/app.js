@@ -93,6 +93,23 @@
     return "";
   }
 
+  /* 엔진별 데이터 시점 배지 — 최신 수집이 차단되면 대시보드는 '마지막 정상 런'을
+     보여주므로(export_dashboard.py), 헤더의 마지막 수집 시각과 카드 데이터 시점이
+     어긋날 수 있다(2026-08-07 사용자 혼동: 수정 전 데이터가 최신처럼 보임).
+     6시간 이상 낡으면 시점을 명시해 오독을 막는다. */
+  function staleTag(rs) {
+    if (!rs.length || !state.generatedAt) return "";
+    var newest = "";
+    for (var i = 0; i < rs.length; i++) {
+      if (rs[i].collected_at > newest) newest = rs[i].collected_at;
+    }
+    var lagMs = new Date(state.generatedAt.replace(" ", "T")) - new Date(newest.replace(" ", "T"));
+    if (!newest || isNaN(lagMs) || lagMs < 6 * 3600 * 1000) return "";
+    var d = newest.slice(5, 16).replace("-", "/");
+    return '<span class="stale-tag" title="이후 수집이 차단되어 마지막 정상 수집 데이터를 표시 중 — 다음 정상 수집 시 자동 갱신">' +
+      d + " 데이터</span>";
+  }
+
   function renderCards() {
     var html = CARD_CELLS.map(function (cell) {
       var engine = cell[0], area = cell[1];
@@ -100,7 +117,7 @@
       var blockedCount = rs.filter(function (r) { return r.status === "blocked"; }).length;
       var unavailable = rs.length === 0 || blockedCount / rs.length >= 0.5;
       var title = '<div class="card-title"><span>' + ENGINE_LABEL[engine] +
-        '</span><span class="area-tag">' + AREA_LABEL[area] + "</span></div>";
+        '</span>' + staleTag(rs) + '<span class="area-tag">' + AREA_LABEL[area] + "</span></div>";
 
       if (unavailable) {
         return '<div class="card card-blocked" data-engine="' + engine + '" data-area="' + area + '">' +
@@ -580,6 +597,7 @@
       var latest = res[0];
       state.records = (latest.records || []).map(function (r, i) { r._idx = i; return r; });
       state.trends = res[1] || { days: [], series: {} };
+      state.generatedAt = latest.generated_at || "";
       $("generatedAt").textContent = "마지막 수집: " + (latest.generated_at || "–");
       renderCards();
       renderTable();
