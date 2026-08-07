@@ -45,7 +45,7 @@
       <select id="fStatus" title="상태">
         <option value="">상태 전체</option>
         <option value="ok">정상</option>
-        <option value="not_found">권외</option>
+        <option value="not_found">미노출</option>
         <option value="no_section">광고영역 없음</option>
         <option value="blocked">차단</option>
         <option value="parse_fail">구조변경 의심</option>
@@ -91,6 +91,18 @@
     </div>
     <div class="chart-box"><canvas id="modalChart"></canvas></div>
     <div id="modalLinks" class="modal-links"></div>
+  </div>
+</div>
+
+<div id="kwModal" class="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="kwModalTitle">
+    <div class="modal-head">
+      <h2 id="kwModalTitle"></h2>
+      <button type="button" class="modal-close" data-close aria-label="닫기">&times;</button>
+    </div>
+    <p id="kwModalDesc" class="kw-desc"></p>
+    <div id="kwModalChips" class="kw-chips"></div>
   </div>
 </div>
 

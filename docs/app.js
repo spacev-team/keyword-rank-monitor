@@ -11,14 +11,14 @@
   var AREA_LABEL = { ad: "광고", organic: "오가닉", app: "앱" };
   var STATUS_LABEL = {
     ok: "정상",
-    not_found: "권외",
+    not_found: "미노출",
     no_section: "광고영역 없음",
     blocked: "차단",
     parse_fail: "구조변경 의심",
     error: "수집오류"
   };
   var RANK_NONE_LABEL = {
-    not_found: "권외",
+    not_found: "미노출",
     no_section: "광고없음",
     blocked: "차단",
     parse_fail: "확인필요",
@@ -82,6 +82,16 @@
   }
 
   /* ---------- summary cards ---------- */
+  /* 카드에 순위를 직표시할 핵심 키워드 — 브랜드 대표 + 검색광고 매출 상위 일반 2개 */
+  var PINNED_KEYWORDS = ["삼삼엠투", "단기임대", "단기월세"];
+
+  function countDelta(now, prev) {
+    var d = now - prev;
+    if (d > 0) return '<span class="delta-up">▲' + d + "</span>";
+    if (d < 0) return '<span class="delta-down">▼' + (-d) + "</span>";
+    return "";
+  }
+
   function renderCards() {
     var html = CARD_CELLS.map(function (cell) {
       var engine = cell[0], area = cell[1];
@@ -97,23 +107,67 @@
           '<div class="card-rows"><div class="card-row"><span>수집 레코드</span><b>' + rs.length + "개</b></div></div></div>";
       }
 
+      /* 첫 수집처럼 직전 런 데이터가 아예 없으면 증감 표시를 전부 숨긴다 */
+      var hasPrev = rs.some(function (r) { return r.prev_rank != null; });
+
+      /* 핵심 키워드 현재 순위 + 변동 */
+      var pinned = PINNED_KEYWORDS.map(function (kw) {
+        var r = null;
+        for (var i = 0; i < rs.length; i++) {
+          if (rs[i].keyword === kw) { r = rs[i]; break; }
+        }
+        if (!r) return "";
+        return '<div class="card-kw-row" data-kw="' + esc(kw) + '" title="순위 추이 보기">' +
+          '<span class="card-kw">' + esc(kw) + "</span>" +
+          '<span class="card-val">' + rankCell(r) + (hasPrev ? deltaCell(r) : "") + "</span></div>";
+      }).join("");
+
+      /* 노출 수치 + 전회 대비 증감 */
       function exposure(sub) {
-        var shown = sub.filter(function (r) { return r.rank != null; }).length;
-        return sub.length ? "<b>" + shown + "/" + sub.length + "</b>" : '<b class="none">–</b>';
+        if (!sub.length) return '<span class="card-val"><b class="none">–</b></span>';
+        var now = sub.filter(function (r) { return r.rank != null; }).length;
+        var prev = sub.filter(function (r) { return r.prev_rank != null; }).length;
+        return '<span class="card-val"><b>' + now + "/" + sub.length + "</b>" +
+          (hasPrev ? countDelta(now, prev) : "") + "</span>";
       }
       var brand = rs.filter(function (r) { return isBrand(r.group); });
       var generic = rs.filter(function (r) { return !isBrand(r.group); });
       var top3 = rs.filter(function (r) { return r.rank != null && r.rank <= 3; }).length;
+      var top3prev = rs.filter(function (r) { return r.prev_rank != null && r.prev_rank <= 3; }).length;
       var bad = rs.filter(function (r) { return BAD_STATUS[r.status] === 1; }).length;
 
-      return '<div class="card" data-engine="' + engine + '" data-area="' + area + '">' + title +
+      /* 전회 대비 하락/이탈 한 줄 — 조치가 필요한 변화만 노출 */
+      var dropLine = "";
+      if (hasPrev) {
+        var worst = null;
+        var drops = rs.filter(function (r) {
+          var d = deltaOf(r);
+          if (typeof d === "number" && d < 0) {
+            if (worst === null || d < deltaOf(worst)) worst = r;
+            return true;
+          }
+          return d === "lost";
+        });
+        if (drops.length) {
+          var head = worst
+            ? esc(worst.keyword) + " " + worst.prev_rank + "→" + worst.rank + "위"
+            : "노출 이탈 " + drops.length + "건";
+          var extra = worst && drops.length > 1 ? " 외 " + (drops.length - 1) + "건" : "";
+          dropLine = '<div class="card-drop" title="전회 대비 순위 하락·노출 이탈">▼ ' + head + extra + "</div>";
+        }
+      }
+
+      return '<div class="card card-clickable" data-engine="' + engine + '" data-area="' + area +
+        '" title="클릭: 아래 테이블을 이 엔진·영역으로 필터">' + title +
+        (pinned ? '<div class="card-kws">' + pinned + "</div>" : "") +
         '<div class="card-rows">' +
-        '<div class="card-row"><span>브랜드 노출</span>' + exposure(brand) + "</div>" +
-        '<div class="card-row"><span>일반 노출</span>' + exposure(generic) + "</div>" +
-        '<div class="card-row"><span>TOP3</span><b>' + top3 + "개</b></div>" +
+        '<div class="card-row"><span class="kw-group-link" data-group="brand" title="키워드 목록 보기">브랜드 노출</span>' + exposure(brand) + "</div>" +
+        '<div class="card-row"><span class="kw-group-link" data-group="generic" title="키워드 목록 보기">일반 노출</span>' + exposure(generic) + "</div>" +
+        '<div class="card-row"><span>TOP3</span><span class="card-val"><b>' + top3 + "개</b>" +
+        (hasPrev ? countDelta(top3, top3prev) : "") + "</span></div>" +
         '<div class="card-row"><span>수집이상</span>' +
         (bad > 0 ? '<b class="bad-count">' + bad + "건</b>" : "<b>0건</b>") +
-        "</div></div></div>";
+        "</div></div>" + dropLine + "</div>";
     }).join("");
     $("summaryCards").innerHTML = html;
   }
@@ -331,6 +385,41 @@
     if (state.chart) { state.chart.destroy(); state.chart = null; }
   }
 
+  /* ---------- keyword group modal ---------- */
+  var GROUP_INFO = {
+    brand: {
+      title: "브랜드 키워드",
+      desc: "\u2018삼삼엠투\u2019, \u201833m2\u2019 가 포함된 자사 브랜드 키워드(수식어 확장 조합 포함)."
+    },
+    generic: {
+      title: "일반 키워드",
+      desc: "네이버 브랜드 검색에서 전환이 발생하고 상위 비용을 차지하는 키워드."
+    }
+  };
+
+  function openKwModal(group) {
+    var seen = {};
+    var kws = [];
+    state.records.forEach(function (r) {
+      if ((group === "brand") !== isBrand(r.group)) return;
+      if (seen[r.keyword]) return;
+      seen[r.keyword] = 1;
+      kws.push(r.keyword);
+    });
+    $("kwModalTitle").textContent = GROUP_INFO[group].title + " · " + kws.length + "개";
+    $("kwModalDesc").textContent = GROUP_INFO[group].desc;
+    $("kwModalChips").innerHTML = kws.map(function (k) {
+      return '<button type="button" class="kw-chip ' + group + '" data-kw="' + esc(k) + '">' + esc(k) + "</button>";
+    }).join("");
+    $("kwModal").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeKwModal() {
+    $("kwModal").hidden = true;
+    document.body.style.overflow = "";
+  }
+
   /* ---------- events ---------- */
   function bindEvents() {
     [["fEngine", "engine"], ["fArea", "area"], ["fGroup", "group"], ["fStatus", "status"]]
@@ -376,11 +465,49 @@
       if (r) openModal(r);
     });
 
+    /* 카드 클릭: 그룹 라벨 → 키워드 팝업 / 핵심 키워드 행 → 추이 모달 /
+       그 외 → 아래 테이블을 해당 엔진·영역으로 필터 */
+    $("summaryCards").addEventListener("click", function (e) {
+      var link = e.target.closest(".kw-group-link");
+      if (link) { openKwModal(link.dataset.group); return; }
+      var card = e.target.closest(".card[data-engine]");
+      if (!card) return;
+      var kwRow = e.target.closest(".card-kw-row");
+      if (kwRow) {
+        for (var i = 0; i < state.records.length; i++) {
+          var r = state.records[i];
+          if (r.engine === card.dataset.engine && r.area === card.dataset.area &&
+              r.keyword === kwRow.dataset.kw) { openModal(r); return; }
+        }
+        return;
+      }
+      if (card.classList.contains("card-blocked")) return;
+      $("fEngine").value = state.filters.engine = card.dataset.engine;
+      $("fArea").value = state.filters.area = card.dataset.area;
+      renderTable();
+      $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    /* 팝업 내 키워드 칩 → 해당 키워드 순위 추이 모달 */
+    $("kwModal").addEventListener("click", function (e) {
+      if (e.target.hasAttribute("data-close")) { closeKwModal(); return; }
+      var chip = e.target.closest(".kw-chip");
+      if (!chip) return;
+      var rec = null;
+      for (var i = 0; i < state.records.length; i++) {
+        if (state.records[i].keyword === chip.dataset.kw) { rec = state.records[i]; break; }
+      }
+      closeKwModal();
+      if (rec) openModal(rec);
+    });
+
     $("modal").addEventListener("click", function (e) {
       if (e.target.hasAttribute("data-close")) closeModal();
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !$("modal").hidden) closeModal();
+      if (e.key !== "Escape") return;
+      if (!$("kwModal").hidden) closeKwModal();
+      else if (!$("modal").hidden) closeModal();
     });
   }
 
