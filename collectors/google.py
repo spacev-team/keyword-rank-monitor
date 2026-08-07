@@ -1,4 +1,4 @@
-"""구글 SERP 순위 수집기 — SerpAPI > 로컬 브라우저 인박스 > 직접 스크레이핑.
+"""구글 SERP 순위 수집기 — SerpAPI > Custom Search API(무료) > 직접 스크레이핑.
 
 구글은 2025년 1월부터 검색 결과에 JS 실행을 요구한다. requests 로 받으면
 UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경에서 실측 확인):
@@ -6,18 +6,17 @@ UA 종류와 무관하게 결과 HTML 대신 벽 페이지가 온다(이 환경�
   - 텍스트 브라우저 UA(Lynx/w3m)   → '더 이상 지원되지 않습니다'(200)
   - 구형 WAP UA                    → 403
   - 실제 Chromium(데이터센터 IP)   → 302 /sorry/ (reCAPTCHA)
-단, 거주지 IP + 실제 Chromium 은 정상 SERP 를 받는다(2026-08-07 실측: 광고
-블록·오가닉 모두 렌더링). 그래서 무료 경로는 로컬 PC 의 Playwright 수집
-(scripts/collect_google_local.py)이 google-serp 브랜치에 올린 JSON 인박스를
-Actions 러너가 소비하는 방식이다. 우선순위:
-  1) SERPAPI_KEY 설정          → SerpAPI 경유(유료, 무설정 시 생략)
-  2) 오늘자 인박스 JSON 존재    → 로컬 브라우저 수집 결과 사용
+거주지 IP + 실제 브라우저는 통하지만(2026-08-07 실측) 상시 켜진 로컬 머신이
+필요해 기각(사용자 확정 2026-08-07: 100% 클라우드). 무료 경로는 구글 공식
+Custom Search JSON API — 일 100쿼리 무료라 브랜드 계열 키워드로 좁혀 쓴다
+(그룹 필터는 run.py, config.GOOGLE_KW_GROUPS). 우선순위:
+  1) SERPAPI_KEY                → SerpAPI 경유(유료, 광고+오가닉 전부)
+  2) GOOGLE_CSE_KEY + CX        → CSE 경유(무료, 오가닉 상위 10만·광고 측정
+     불가 → organic 레코드만 기록, 순위는 실 SERP 근사치)
   3) 직접 스크레이핑            → 데이터센터 IP 에선 사실상 전부 blocked 기록
 벽/캡차는 전부 blocked 로 구분 기록해 '권외'와 섞이지 않게 한다.
 """
 from __future__ import annotations
-
-import json
 
 import requests
 from bs4 import BeautifulSoup
@@ -29,11 +28,11 @@ from collectors.base import (
     RankRecord,
     make_session,
     polite_sleep,
-    today_kst,
 )
 
 _SEARCH_URL = "https://www.google.com/search"
 _SERPAPI_URL = "https://serpapi.com/search"
+_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
 # 차단/벽 페이지 실측 마커 (2026-08 덤프 기준).
 #   /sorry/ 캡차 페이지: URL 에 /sorry/, 본문에 recaptcha·'비정상적인 트래픽'
@@ -50,22 +49,38 @@ class GoogleRankCollector(BaseCollector):
     def collect(self, keywords: list[str]) -> CollectResult:
         if config.SERPAPI_KEY:
             return self._collect_serpapi(keywords)
-        inbox = _load_inbox()
-        if inbox is not None:
-            return self._collect_inbox(keywords, inbox)
+        if config.GOOGLE_CSE_KEY and config.GOOGLE_CSE_CX:
+            return self._collect_cse(keywords)
         return self._collect_scrape(keywords)
 
-    # ── 로컬 브라우저 인박스 경로 ────────────────────
-    def _collect_inbox(self, keywords: list[str], inbox: dict) -> CollectResult:
-        by_kw: dict[str, list[RankRecord]] = {}
-        for d in inbox["records"]:
-            by_kw.setdefault(d["keyword"], []).append(RankRecord(**d))
+    # ── Custom Search API 경로(무료) ─────────────────
+    def _collect_cse(self, keywords: list[str]) -> CollectResult:
+        """CSE 는 광고를 반환하지 않는다 → organic 레코드만 낸다(ad 레코드를
+        no_section 으로 내면 '광고 없음'과 '측정 불가'가 섞이므로 아예 생략).
+        무료 쿼터(일 100) 소진 시 남은 키워드는 error(cse_quota) 로 구분 기록."""
         records: list[RankRecord] = []
-        for kw in keywords:
-            # 로컬 런에 없던 키워드(목록 추가 직후 등)는 미수집으로 구분 기록
-            records += by_kw.get(kw) or _error_pair(kw, "inbox_missing_keyword")
-        return CollectResult(records, meta={
-            "path": "inbox", "generated_at": inbox.get("generated_at", "")})
+        for i, kw in enumerate(keywords):
+            if i:
+                polite_sleep(1.0)  # API 호출은 차단 위험이 없어 짧게만 쉰다
+            try:
+                r = requests.get(_CSE_URL, params={
+                    "key": config.GOOGLE_CSE_KEY, "cx": config.GOOGLE_CSE_CX,
+                    "q": kw, "gl": "kr", "hl": "ko", "num": "10",
+                }, timeout=config.REQUEST_TIMEOUT)
+            except Exception as e:  # noqa: BLE001 — 키워드 단위로 격리
+                records.append(_error_organic(kw, f"cse: {e}"))
+                continue
+            if r.status_code in (403, 429):
+                # 쿼터 소진(dailyLimitExceeded/rateLimitExceeded) — 더 던져봐야
+                # 같은 응답이므로 남은 키워드 전부 구분 기록하고 중단.
+                detail = f"cse_quota {r.status_code}"
+                records += [_error_organic(k, detail) for k in keywords[i:]]
+                break
+            if r.status_code != 200:
+                records.append(_error_organic(kw, f"cse http {r.status_code}"))
+                continue
+            records.append(_rank_cse_organic(kw, r.json().get("items") or []))
+        return CollectResult(records, meta={"path": "cse"})
 
     # ── SerpAPI 경로 ─────────────────────────────────
     def _collect_serpapi(self, keywords: list[str]) -> CollectResult:
@@ -148,22 +163,19 @@ def _fetch(session: requests.Session, kw: str) -> tuple[str, str, str]:
     return body, "", ""
 
 
-def _load_inbox() -> dict | None:
-    """오늘자(KST) 로컬 브라우저 수집 JSON — 없거나 낡았거나 깨졌으면 None.
+def _error_organic(kw: str, detail: str) -> RankRecord:
+    return RankRecord("google", "organic", kw, None, 0, status="error", detail=detail)
 
-    낡은 인박스를 쓰지 않는 이유: 로컬 PC 가 꺼진 날 어제 순위가 오늘로
-    복제되면 추세가 조용히 오염된다. 그 날은 blocked 로 남는 게 정직하다.
-    """
-    path = config.GOOGLE_INBOX_PATH
-    if not path.exists():
-        return None
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if doc.get("date") != today_kst() or not isinstance(doc.get("records"), list):
-        return None
-    return doc
+
+def _rank_cse_organic(kw: str, items: list[dict]) -> RankRecord:
+    """CSE items 는 노출 순서 그대로 — 자사 첫 매칭 순번이 순위(상위 10 한정)."""
+    if not items:
+        return RankRecord("google", "organic", kw, None, 0, status="not_found")
+    for i, item in enumerate(items, 1):
+        if config.is_self_url(item.get("link", "")):
+            return RankRecord("google", "organic", kw, i, len(items),
+                              section="웹결과", matched=item.get("link", "")[:200])
+    return RankRecord("google", "organic", kw, None, len(items), status="not_found")
 
 
 # ── 스크레이핑 파서 ──────────────────────────────────

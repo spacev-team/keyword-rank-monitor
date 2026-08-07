@@ -94,9 +94,15 @@ def run(engine_keys: list[str], kw_pairs: list[tuple[str, str]], dry_run: bool) 
     errors: list[str] = []
 
     for key in engine_keys:
+        # 구글 CSE 경로(무료 일 100쿼리)는 전체 240개를 감당 못 한다 →
+        # 브랜드 계열만(기본 brand,brand_ext,adhoc ≈ 69개, KRM_GOOGLE_GROUPS 로 조정).
+        if key == "google" and config.GOOGLE_CSE_KEY and not config.SERPAPI_KEY:
+            engine_kws = [k for k, g in kw_pairs if g in config.GOOGLE_KW_GROUPS]
+        else:
+            engine_kws = kws
         try:
             col = _load(key)
-            res = col.collect(kws)
+            res = col.collect(engine_kws)
             all_records.extend(res.records)
             print(f"[{key}] {len(res.records)}건 · meta={res.meta}")
         except Exception:

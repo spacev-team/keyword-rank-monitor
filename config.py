@@ -72,8 +72,15 @@ SHEET_ID = env("KRM_SHEET_ID")                       # 미설정 시 Sheets 적�
 SERVICE_ACCOUNT = env("GOOGLE_APPLICATION_CREDENTIALS", "./secrets/service-account.json")
 GOOGLE_CHAT_WEBHOOK_URL = env("KRM_GOOGLE_CHAT_WEBHOOK_URL") or env("GOOGLE_CHAT_WEBHOOK_URL")
 SERPAPI_KEY = env("SERPAPI_KEY")                     # 설정 시 구글 수집이 SerpAPI 경유(차단 회피)
-GOOGLE_INBOX_PATH = Path(env("KRM_GOOGLE_INBOX") or _ROOT / "data" / "google_serp.json")
-                                                     # 로컬 브라우저 수집 결과(JSON) — SERPAPI_KEY 없을 때 2순위 경로
+
+# Google Custom Search JSON API(무료 100쿼리/일) — SERPAPI_KEY 없을 때 2순위.
+# 무료 한도 때문에 구글 수집 키워드를 브랜드 계열로 좁힌다(아래 그룹 필터,
+# 사용자 확정 2026-08-07). adhoc = --keywords 임시 실행도 통과시키기 위함.
+GOOGLE_CSE_KEY = env("GOOGLE_CSE_KEY")
+GOOGLE_CSE_CX = env("GOOGLE_CSE_CX")
+GOOGLE_KW_GROUPS = tuple(
+    g.strip() for g in
+    (env("KRM_GOOGLE_GROUPS", "brand,brand_ext,adhoc") or "").split(",") if g.strip())
 
 # ── 알림 임계값 ──────────────────────────────────────
 ALERT_ORGANIC_DROP = 5    # 오가닉 순위 N계단 이상 하락 시 알림

@@ -60,18 +60,6 @@ jobs:
             echo "no state branch yet (first run)"
           fi
 
-      # 구글 인박스: 로컬 PC(거주지 IP) 브라우저 수집 결과. daily 런만 소비하며,
-      # 브랜치/파일이 없거나 낡았으면 수집기가 알아서 blocked 로 강등한다.
-      - name: Restore google inbox (google-serp branch -> data/)
-        if: ${{ env.MODE == 'daily' }}
-        run: |
-          if git fetch -q --depth 1 origin google-serp; then
-            git checkout -q FETCH_HEAD -- data/google_serp.json || echo "inbox 파일 없음"
-            ls -la data/ || true
-          else
-            echo "no google-serp branch — SERPAPI_KEY 미설정이면 구글은 blocked 기록"
-          fi
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
