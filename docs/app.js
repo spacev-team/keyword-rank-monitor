@@ -24,11 +24,12 @@
     parse_fail: "확인필요",
     error: "오류"
   };
+  /* 구글 광고는 측정 제외(유료 SerpAPI 없이 측정 불가 — 사용자 확정 2026-08-07) */
   var CARD_CELLS = [
     ["naver", "ad"], ["naver", "organic"],
-    ["google", "ad"], ["google", "organic"],
-    ["daum", "ad"], ["daum", "organic"],
-    ["playstore", "app"], ["appstore", "app"]
+    ["google", "organic"], ["daum", "ad"],
+    ["daum", "organic"], ["playstore", "app"],
+    ["appstore", "app"]
   ];
   var BAD_STATUS = { blocked: 1, parse_fail: 1, error: 1 };
   var BRAND_GROUPS = { brand: 1, brand_ext: 1 };
@@ -82,8 +83,8 @@
   }
 
   /* ---------- summary cards ---------- */
-  /* 카드에 순위를 직표시할 핵심 키워드 — 브랜드 대표 + 검색광고 매출 상위 일반 2개 */
-  var PINNED_KEYWORDS = ["삼삼엠투", "단기임대", "단기월세"];
+  /* 카드에 순위를 직표시할 핵심 키워드(사용자 확정) — 데이터상 표기와 일치해야 매칭된다 */
+  var PINNED_KEYWORDS = ["삼삼엠투", "33M2", "단기임대"];
 
   function countDelta(now, prev) {
     var d = now - prev;
@@ -116,7 +117,13 @@
         for (var i = 0; i < rs.length; i++) {
           if (rs[i].keyword === kw) { r = rs[i]; break; }
         }
-        if (!r) return "";
+        if (!r) {
+          /* 구글은 일반 키워드를 수집하지 않아 카드 간 구성이 어긋난다 →
+             빈칸 대신 '측정 제외'로 이유를 보여줘 구성을 통일 */
+          return '<div class="card-kw-row is-excluded" title="이 엔진에서는 측정하지 않는 키워드(무료 API 쿼터로 브랜드만 수집)">' +
+            '<span class="card-kw">' + esc(kw) + "</span>" +
+            '<span class="card-val"><span class="delta-flat">측정 제외</span></span></div>';
+        }
         return '<div class="card-kw-row" data-kw="' + esc(kw) + '" title="순위 추이 보기">' +
           '<span class="card-kw">' + esc(kw) + "</span>" +
           '<span class="card-val">' + rankCell(r) + (hasPrev ? deltaCell(r) : "") + "</span></div>";
@@ -124,7 +131,7 @@
 
       /* 노출 수치 + 전회 대비 증감 */
       function exposure(sub) {
-        if (!sub.length) return '<span class="card-val"><b class="none">–</b></span>';
+        if (!sub.length) return '<span class="card-val" title="무료 API 쿼터 때문에 구글은 브랜드 키워드만 수집"><span class="delta-flat">측정 제외</span></span>';
         var now = sub.filter(function (r) { return r.rank != null; }).length;
         var prev = sub.filter(function (r) { return r.prev_rank != null; }).length;
         return '<span class="card-val"><b>' + now + "/" + sub.length + "</b>" +
@@ -163,9 +170,9 @@
         '<div class="card-rows">' +
         '<div class="card-row"><span class="kw-group-link" data-group="brand" title="키워드 목록 보기">브랜드 노출</span>' + exposure(brand) + "</div>" +
         '<div class="card-row"><span class="kw-group-link" data-group="generic" title="키워드 목록 보기">일반 노출</span>' + exposure(generic) + "</div>" +
-        '<div class="card-row"><span>TOP3</span><span class="card-val"><b>' + top3 + "개</b>" +
+        '<div class="card-row"><span class="kw-group-link top3-link" title="TOP3 설명·키워드 보기">TOP3</span><span class="card-val"><b>' + top3 + "개</b>" +
         (hasPrev ? countDelta(top3, top3prev) : "") + "</span></div>" +
-        '<div class="card-row"><span>수집이상</span>' +
+        '<div class="card-row"><span class="kw-group-link bad-link" title="수집이상 레코드를 테이블에서 보기">수집이상</span>' +
         (bad > 0 ? '<b class="bad-count">' + bad + "건</b>" : "<b>0건</b>") +
         "</div></div>" + dropLine + "</div>";
     }).join("");
@@ -217,7 +224,9 @@
       if (f.area && r.area !== f.area) return false;
       if (f.group === "brand" && !isBrand(r.group)) return false;
       if (f.group === "generic" && isBrand(r.group)) return false;
-      if (f.status && r.status !== f.status) return false;
+      if (f.status === "bad") {
+        if (BAD_STATUS[r.status] !== 1) return false;
+      } else if (f.status && r.status !== f.status) return false;
       if (kw && r.keyword.toLowerCase().indexOf(kw) === -1) return false;
       return true;
     });
@@ -270,9 +279,13 @@
   }
 
   function rankCell(r) {
-    if (r.rank != null) return '<span class="rank-val">' + r.rank + "위</span>";
+    /* '1위 / 20' = 스캔한 20개 결과 중 1위 — 결과수 별도 컬럼의 의미 혼동을 흡수
+       (2026-08-07 사용자 피드백). 권외도 '/ 20'을 붙여 '20개 안에 없음'을 드러낸다. */
+    var suffix = r.total > 0 ? ' <span class="rank-total">/ ' + r.total + "</span>" : "";
+    if (r.rank != null) return '<span class="rank-val">' + r.rank + "위</span>" + suffix;
     var label = RANK_NONE_LABEL[r.status] || "–";
-    return '<span class="rank-none s-' + esc(r.status) + '">' + label + "</span>";
+    return '<span class="rank-none s-' + esc(r.status) + '">' + label + "</span>" +
+      (r.status === "not_found" ? suffix : "");
   }
 
   function renderTable() {
@@ -290,7 +303,6 @@
         '<td class="num">' + rankCell(r) + "</td>" +
         "<td>" + deltaCell(r) + "</td>" +
         "<td>" + esc(r.section || "–") + "</td>" +
-        '<td class="num">' + (r.total != null ? r.total : "–") + "</td>" +
         '<td><span class="badge badge-s-' + esc(r.status) + '">' + (STATUS_LABEL[r.status] || esc(r.status)) + "</span></td>" +
         "<td>" + sparklineSVG(r.engine, r.area, r.keyword) + "</td>" +
         '<td class="go">' + goBtn(r.engine, r.keyword) + "</td>" +
@@ -313,6 +325,9 @@
     Object.keys(state.trends.series).forEach(function (key) {
       var p = key.split("|");
       if (p.slice(2).join("|") !== keyword) return;
+      var series = state.trends.series[key];
+      /* 값이 전부 null 인 시리즈(구글 광고 blocked 이력 등)는 범례 노이즈 → 제외 */
+      if (!series.some(function (v) { return v != null; })) return;
       var color = CHART_COLORS[ci % CHART_COLORS.length];
       ci++;
       datasets.push({
@@ -420,6 +435,30 @@
     document.body.style.overflow = "";
   }
 
+  /* TOP3 = 해당 엔진·영역에서 자사가 검색 결과 1~3위 안에 노출된 키워드 수.
+     팝업으로 정의와 실제 키워드 목록(현재 순위 포함)을 보여준다. */
+  function openTop3Modal(engine, area) {
+    var rows = state.records.filter(function (r) {
+      return r.engine === engine && r.area === area && r.rank != null && r.rank <= 3;
+    }).sort(function (a, b) {
+      return a.rank - b.rank || a.keyword.localeCompare(b.keyword, "ko");
+    });
+    $("kwModalTitle").textContent =
+      (ENGINE_LABEL[engine] || engine) + " " + (AREA_LABEL[area] || area) +
+      " · TOP3 " + rows.length + "개";
+    $("kwModalDesc").textContent =
+      "이 엔진·영역에서 자사(삼삼엠투)가 검색 결과 1~3위 안에 노출된 키워드입니다. " +
+      "상위 노출일수록 클릭 유입이 커서, 이 개수가 줄면 노출 경쟁에서 밀리고 있다는 신호입니다. " +
+      "키워드를 누르면 순위 추이를 볼 수 있습니다.";
+    $("kwModalChips").innerHTML = rows.map(function (r) {
+      return '<button type="button" class="kw-chip' + (isBrand(r.group) ? "" : " generic") +
+        '" data-kw="' + esc(r.keyword) + '">' + esc(r.keyword) +
+        " <b>" + r.rank + "위</b></button>";
+    }).join("");
+    $("kwModal").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
   /* ---------- events ---------- */
   function bindEvents() {
     [["fEngine", "engine"], ["fArea", "area"], ["fGroup", "group"], ["fStatus", "status"]]
@@ -469,7 +508,22 @@
        그 외 → 아래 테이블을 해당 엔진·영역으로 필터 */
     $("summaryCards").addEventListener("click", function (e) {
       var link = e.target.closest(".kw-group-link");
-      if (link) { openKwModal(link.dataset.group); return; }
+      if (link) {
+        var linkCard = e.target.closest(".card[data-engine]");
+        if (link.classList.contains("top3-link") && linkCard) {
+          openTop3Modal(linkCard.dataset.engine, linkCard.dataset.area);
+        } else if (link.classList.contains("bad-link") && linkCard) {
+          /* 수집이상 → 테이블을 해당 엔진·영역의 이상 레코드(차단·구조변경·오류)로 필터 */
+          $("fEngine").value = state.filters.engine = linkCard.dataset.engine;
+          $("fArea").value = state.filters.area = linkCard.dataset.area;
+          $("fStatus").value = state.filters.status = "bad";
+          renderTable();
+          $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          openKwModal(link.dataset.group);
+        }
+        return;
+      }
       var card = e.target.closest(".card[data-engine]");
       if (!card) return;
       var kwRow = e.target.closest(".card-kw-row");

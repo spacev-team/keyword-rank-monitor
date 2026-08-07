@@ -46,6 +46,7 @@
         <option value="">상태 전체</option>
         <option value="ok">정상</option>
         <option value="not_found">미노출</option>
+        <option value="bad">수집이상(차단·오류 전체)</option>
         <option value="no_section">광고영역 없음</option>
         <option value="blocked">차단</option>
         <option value="parse_fail">구조변경 의심</option>
@@ -65,10 +66,9 @@
             <th>그룹</th>
             <th>엔진</th>
             <th>영역</th>
-            <th data-sort="rank" class="sortable num">순위</th>
-            <th data-sort="delta" class="sortable">변동</th>
-            <th>섹션</th>
-            <th class="num">결과수</th>
+            <th data-sort="rank" class="sortable num" title="자사 순위 / 그 영역에서 확인한 결과 수 (예: 1위 / 20 = 20개 중 1위, 권외 / 20 = 20개 안에 없음)">순위</th>
+            <th data-sort="delta" class="sortable" title="직전 수집 대비 순위 변동">변동</th>
+            <th title="자사가 노출된 SERP 블록(파워링크·웹사이트·프리미엄링크 등) — 권외·차단이면 비어 있음">섹션</th>
             <th>상태</th>
             <th>추이</th>
             <th class="go">보러가기</th>
@@ -78,6 +78,11 @@
         <tbody id="tableBody"></tbody>
       </table>
       <div id="emptyMsg" class="empty-msg" hidden>조건에 맞는 데이터가 없습니다.</div>
+      <p class="table-legend">
+        <strong>순위</strong> 1위 / 20 = 확인한 20개 결과 중 1위, 권외 / 20 = 20개 안에 미노출 ·
+        <strong>섹션</strong> = 자사가 노출된 SERP 블록(권외·차단 시 없음) ·
+        <strong>차단</strong> = 수집 차단(순위 아님) — 열 제목에 마우스를 올리면 설명이 보입니다.
+      </p>
     </div>
   </section>
 </main>

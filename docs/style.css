@@ -117,6 +117,8 @@ body {
 }
 .card-kw-row:hover { background: var(--accent-soft); }
 .card-kw { font-weight: 600; }
+.card-kw-row.is-excluded:hover { background: none; }
+.card-kw-row.is-excluded .card-kw { color: var(--muted); font-weight: 500; }
 .card-val { display: inline-flex; gap: 6px; align-items: baseline; }
 .card-drop {
   margin-top: 9px;
@@ -209,6 +211,13 @@ td.time { color: var(--muted); font-size: 0.82rem; }
 .rank-none.s-not_found { color: var(--muted); }
 .rank-none.s-no_section { color: #B9B7CC; }
 .rank-none.s-blocked { color: var(--warn); }
+.rank-total { color: var(--muted); font-weight: 400; font-size: 0.82em; }
+.table-legend {
+  margin: 10px 4px 2px;
+  color: var(--text-sub);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
 .rank-none.s-parse_fail, .rank-none.s-error { color: var(--err); }
 
 .delta-up { color: var(--up); font-weight: 600; }
