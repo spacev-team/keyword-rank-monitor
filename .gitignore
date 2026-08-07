@@ -5,3 +5,4 @@ secrets/
 logs/
 __pycache__/
 *.pyc
+/_*.html

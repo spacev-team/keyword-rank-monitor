@@ -32,8 +32,11 @@
 
 ## 알려진 리스크
 
-- **구글**: 2025-01부터 검색에 JS 필수 → 직접 스크레이핑 불가. `KRM_DOTENV` 시크릿에
-  `SERPAPI_KEY` 설정 시에만 실데이터(미설정 시 `blocked` 기록, 대시보드에 '차단/미설정' 표시).
+- **구글**: 2025-01부터 검색에 JS 필수 → 러너(데이터센터 IP)에선 직접 스크레이핑 불가.
+  실데이터 경로: ① `KRM_DOTENV` 의 `SERPAPI_KEY`(유료) ② 로컬 PC 의
+  `scripts/collect_google_local.py`(Playwright, 거주지 IP)가 `google-serp` 브랜치에 올린
+  **당일** 인박스 — daily 런이 소비(낡은 인박스는 무시). 둘 다 없으면 `blocked` 기록,
+  대시보드에 '차단/미설정' 표시. 로컬 수집 스케줄 등록은 `scripts/register_google_task.ps1`.
 - **러너 IP 봇차단(네이버)**: 러너 IP 복불복로 간헐 차단(2026-08-06 실측). 수집기가 쿨다운
   재시도 후 조기 중단하고, 대시보드는 엔진별 '마지막 정상 런'을 보여주므로 자가 회복된다.
 - **repo 공개**: org free 플랜에서 Pages 는 public repo 필수 → 키워드 목록·순위 데이터 공개.

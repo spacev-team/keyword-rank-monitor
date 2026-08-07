@@ -29,7 +29,7 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 |---|---|---|---|
 | naver | ad | PC 통합검색 HTML 파싱 | 파워링크·브랜드검색 광고 유닛(상단+하단 통합) 중 자사 순번 |
 | naver | organic | 〃 | 광고 제외 결과 블록 DOM 순서 중 자사 첫 매칭(섹션명 기록) |
-| google | ad / organic | SerpAPI(`SERPAPI_KEY` 필요) 또는 직접 파싱 | 상동 |
+| google | ad / organic | SerpAPI → 로컬 브라우저 인박스(`google-serp` 브랜치) → 직접 파싱 순 | 상동 |
 | daum | ad / organic | 통합검색 HTML 파싱 | 프리미엄링크 / 오가닉 블록 |
 | playstore | app | google_play_scraper.search (상위 30) | 검색 결과 중 자사 앱 순번 |
 | appstore | app | iTunes Search API (상위 200) | 상동 |
@@ -38,8 +38,9 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 - `rank=NULL` 은 `status` 로 구분: `not_found`(정상 파싱, 미노출) / `no_section`(광고 영역
   없음) / `blocked`(봇 차단) / `parse_fail`(SERP 구조 변경 의심) / `error`(네트워크 등).
   → **권외와 수집 실패를 절대 섞지 않는다.**
-- ⚠️ 구글은 2025-01부터 검색에 JS 필수 → 직접 스크레이핑 불가. `SERPAPI_KEY`(Actions 시크릿
-  `KRM_DOTENV` 내) 설정 시에만 실데이터, 미설정 시 `blocked` 기록.
+- ⚠️ 구글은 2025-01부터 검색에 JS 필수 → 데이터센터 IP 직접 스크레이핑 불가. 실데이터 경로는
+  ① `SERPAPI_KEY`(유료) 또는 ② 로컬 PC Playwright 수집(`scripts/collect_google_local.py`)이
+  `google-serp` 브랜치에 올린 당일 인박스. 둘 다 없으면 `blocked` 기록.
 - ⚠️ SERP 는 기기·지역·개인화로 달라짐 — 동일 방법론 반복 측정의 **추세 추적 프록시**.
 
 ## 로컬 실행 (개발·점검용)
