@@ -85,7 +85,8 @@ def _change_alerts(records: list[RankRecord], prev: dict, kw_groups: dict[str, s
     return alerts
 
 
-def run(engine_keys: list[str], kw_pairs: list[tuple[str, str]], dry_run: bool) -> int:
+def run(engine_keys: list[str], kw_pairs: list[tuple[str, str]], dry_run: bool,
+        with_volumes: bool = False) -> int:
     kw_groups = dict(kw_pairs)
     kws = [k for k, _ in kw_pairs]
     run_id = _dt.datetime.now(KST).strftime("%Y%m%d-%H%M%S")
@@ -128,6 +129,16 @@ def run(engine_keys: list[str], kw_pairs: list[tuple[str, str]], dry_run: bool) 
         errors.append(f"[sheets] {exc}")
         print(errors[-1])
 
+    # 검색량(키워드도구 30일) — daily 런에서 하루 1회. 실패해도 순위 수집은 유효.
+    if with_volumes:
+        try:
+            import volumes
+            meta = volumes.collect_and_store(store.db, [k for k, _ in kw_pairs])
+            print(f"[volumes] meta={meta}")
+        except Exception:
+            errors.append(f"[volumes] 검색량 수집 실패:\n{traceback.format_exc(limit=3)}")
+            print(errors[-1])
+
     lines = _summary_lines(all_records, kw_groups)
     alerts = _change_alerts(all_records, prev, kw_groups)
     body = [f"📊 키워드 순위 수집 완료 ({collected_at})", *lines]
@@ -151,6 +162,8 @@ def main() -> int:
                     help="키워드 그룹 필터(brand = brand+brand_ext)")
     ap.add_argument("--keywords", help="쉼표 구분 임시 키워드(그룹 필터 무시)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--volumes", action="store_true",
+                    help="네이버 검색량(30일)도 수집 — daily 모드는 자동 포함")
     ap.add_argument("--export-csv", metavar="PATH", help="이력 CSV 내보내기 후 종료")
     args = ap.parse_args()
 
@@ -188,8 +201,9 @@ def main() -> int:
         elif args.group == "generic":
             pairs = [(k, g) for k, g in pairs if g == "generic"]
 
-    print(f"엔진 {keys} × 키워드 {len(pairs)}개")
-    return run(keys, pairs, args.dry_run)
+    with_volumes = args.volumes or args.mode == "daily"
+    print(f"엔진 {keys} × 키워드 {len(pairs)}개" + (" + 검색량" if with_volumes else ""))
+    return run(keys, pairs, args.dry_run, with_volumes=with_volumes)
 
 
 if __name__ == "__main__":

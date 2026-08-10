@@ -273,6 +273,13 @@
         if (vb === null) return -1;
         return dir * (vb - va); /* 기본(asc 클릭)에서 상승 큰 순 */
       }
+      if (s.key === "sv") {
+        va = a.sv == null ? null : a.sv; vb = b.sv == null ? null : b.sv;
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1; /* 검색량 미확인은 항상 하단 */
+        if (vb === null) return -1;
+        return dir * (vb - va); /* 첫 클릭 = 검색량 큰 순 */
+      }
       return 0;
     });
     return rows;
@@ -305,6 +312,15 @@
       (r.status === "not_found" ? suffix : "");
   }
 
+  /* 네이버 키워드도구 최근 30일 검색수(PC+MO) ÷ 30 = 일평균 — daily 런에서 갱신.
+     띄어쓰기 변형('삼삼엠투 후기')은 API 정규화 특성상 무공백형과 같은 값이다. */
+  function svCell(r) {
+    if (r.sv == null) return '<span class="delta-flat">–</span>';
+    var daily = Math.round(r.sv / 30);
+    return '<span class="sv-val" title="최근 30일 총 ' + r.sv.toLocaleString() + '회">' +
+      daily.toLocaleString() + "</span>";
+  }
+
   function renderTable() {
     var rows = sortRecords(filteredRecords());
     var body = $("tableBody");
@@ -315,6 +331,7 @@
       html += '<tr data-idx="' + r._idx + '">' +
         '<td class="kw">' + esc(r.keyword) + "</td>" +
         "<td><span class=\"badge " + (groupBrand ? "badge-group-brand\">브랜드" : "badge-group-generic\">일반") + "</span></td>" +
+        '<td class="num">' + svCell(r) + "</td>" +
         "<td>" + (ENGINE_LABEL[r.engine] || esc(r.engine)) + "</td>" +
         "<td>" + (AREA_LABEL[r.area] || esc(r.area)) + "</td>" +
         '<td class="num">' + rankCell(r) + "</td>" +

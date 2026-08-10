@@ -81,6 +81,20 @@ SERPER_KEY = env("SERPER_KEY")
 GOOGLE_KW_GROUPS = tuple(
     g.strip() for g in
     (env("KRM_GOOGLE_GROUPS", "brand,brand_ext,adhoc") or "").split(",") if g.strip())
+
+# ── 네이버 검색광고(키워드도구 검색량) — EMM 과 동일 형식 ──
+#   NAVER_SEARCHAD_ACCOUNTS=CID:APIKEY:SECRET(,CID2:APIKEY2:SECRET2)
+def _parse_searchad_accounts() -> list[dict]:
+    raw = env("NAVER_SEARCHAD_ACCOUNTS", "") or ""
+    accts = []
+    for part in raw.split(","):
+        bits = part.strip().split(":")
+        if len(bits) == 3:
+            accts.append({"customer_id": bits[0], "api_key": bits[1], "secret": bits[2]})
+    return accts
+
+
+NAVER_SEARCHAD_ACCOUNTS = _parse_searchad_accounts()
 # 구글 수집 요일(KST, 소문자 3글자) — 브랜드 키워드는 구글에서 1~2위로 안정적이라
 # 주 1회면 추세 추적에 충분(2026-08-07 실측·사용자 비용 우려 반영). 빈 값 = 매일.
 GOOGLE_DAYS = frozenset(

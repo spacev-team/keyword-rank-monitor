@@ -38,6 +38,11 @@ def export(store: Store, out_dir: Path = OUT_DIR) -> dict:
         good = [rid for rid, b, n in rows if b * 2 < n]
         return good if good else [rows[0][0]]
 
+    # 네이버 검색량(키워드도구 30일 총검색수) — daily 런이 volumes 테이블에 적재.
+    # 레코드마다 sv 로 조인(엔진 무관 동일 값). 없으면 키 생략 → 대시보드는 '–'.
+    import volumes as vmod
+    sv_map = vmod.latest_map(db)
+
     records: list[dict] = []
     latest_run = None
     for (eng,) in db.execute("SELECT DISTINCT engine FROM ranks"):
@@ -53,13 +58,16 @@ def export(store: Store, out_dir: Path = OUT_DIR) -> dict:
         for (area, kw, rank, total, section, matched, status, ca) in db.execute(
                 "SELECT area, keyword, rank, total, section, matched, status, collected_at"
                 " FROM ranks WHERE engine = ? AND run_id = ?", (eng, chosen)):
-            records.append({
+            rec = {
                 "engine": eng, "area": area, "keyword": kw,
                 "group": kw_groups.get(kw, "generic"),
                 "rank": rank, "prev_rank": prev_map.get((area, kw)),
                 "total": total, "section": section, "matched": matched,
                 "status": status, "collected_at": ca,
-            })
+            }
+            if kw in sv_map:
+                rec["sv"] = sv_map[kw]  # 최근 30일 총검색수(PC+MO)
+            records.append(rec)
 
     latest_doc = {"generated_at": now_kst(), "run_id": latest_run,
                   "self_name": config.SELF_NAME, "records": records}

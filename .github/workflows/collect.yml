@@ -67,18 +67,23 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # .env 는 시크릿 KRM_DOTENV 에서 복원(웹훅·SerpAPI 키 등). 미설정이어도 동작 —
+      # .env 는 시크릿 KRM_DOTENV 에서 복원(웹훅·Serper 키 등). 미설정이어도 동작 —
       # 알림 생략·구글 blocked 기록. tr -d '\r' = CRLF 시크릿 방어(EMM 07-07 실사고 교훈).
+      # KRM_SEARCHAD(네이버 키워드도구 검색량)는 별도 시크릿 — KRM_DOTENV 를 소유한
+      # 세션과 독립적으로 갱신할 수 있게 분리 병합한다(값을 읽을 수 없는 시크릿을
+      # 덮어쓰는 사고 방지, 2026-08-10).
       - name: Restore credentials (optional)
         env:
           DOTENV: ${{ secrets.KRM_DOTENV }}
+          SEARCHAD: ${{ secrets.KRM_SEARCHAD }}
         run: |
           if [ -n "$DOTENV" ]; then
             printf '%s' "$DOTENV" | tr -d '\r' > .env
-            echo ".env restored ($(wc -l < .env) lines)"
-          else
-            echo "KRM_DOTENV 미설정 — 기본값으로 실행(알림·Sheets·SerpAPI 없음)"
           fi
+          if [ -n "$SEARCHAD" ] && ! grep -q '^NAVER_SEARCHAD_ACCOUNTS=' .env 2>/dev/null; then
+            printf '\nNAVER_SEARCHAD_ACCOUNTS=%s\n' "$(printf '%s' "$SEARCHAD" | tr -d '\r')" >> .env
+          fi
+          [ -f .env ] && echo ".env restored ($(wc -l < .env) lines)" || echo "시크릿 미설정 — 기본값 실행"
 
       - name: Run collectors
         id: collectors
