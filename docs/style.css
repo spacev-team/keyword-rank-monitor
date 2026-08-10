@@ -338,6 +338,8 @@ td.time { color: var(--muted); font-size: 0.82rem; }
 }
 .kw-chip:hover { border-color: var(--accent); }
 .kw-chip.generic { background: #EEF3F8; color: #48607A; }
+.chip-legend { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); font-size: 0.8rem; }
+.legend-chip { font-size: 0.75rem; padding: 1px 8px; cursor: default; }
 
 /* ---- responsive ---- */
 @media (max-width: 640px) {

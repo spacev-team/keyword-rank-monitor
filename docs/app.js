@@ -463,10 +463,13 @@
     $("kwModalTitle").textContent =
       (ENGINE_LABEL[engine] || engine) + " " + (AREA_LABEL[area] || area) +
       " · TOP3 " + rows.length + "개";
-    $("kwModalDesc").textContent =
+    /* 칩 색 = 키워드 그룹(순위와 무관) — 범례 없이는 오독됨(2026-08-07 사용자 질문) */
+    $("kwModalDesc").innerHTML =
       "이 엔진·영역에서 자사(삼삼엠투)가 검색 결과 1~3위 안에 노출된 키워드입니다. " +
       "상위 노출일수록 클릭 유입이 커서, 이 개수가 줄면 노출 경쟁에서 밀리고 있다는 신호입니다. " +
-      "키워드를 누르면 순위 추이를 볼 수 있습니다.";
+      "키워드를 누르면 순위 추이를 볼 수 있습니다.<br>" +
+      '<span class="chip-legend"><span class="kw-chip legend-chip">브랜드 키워드</span>' +
+      '<span class="kw-chip generic legend-chip">일반 키워드</span> — 색은 키워드 그룹 구분(순위와 무관)</span>';
     $("kwModalChips").innerHTML = rows.map(function (r) {
       return '<button type="button" class="kw-chip' + (isBrand(r.group) ? "" : " generic") +
         '" data-kw="' + esc(r.keyword) + '">' + esc(r.keyword) +
@@ -563,7 +566,7 @@
     $("kwModal").addEventListener("click", function (e) {
       if (e.target.hasAttribute("data-close")) { closeKwModal(); return; }
       var chip = e.target.closest(".kw-chip");
-      if (!chip) return;
+      if (!chip || !chip.dataset.kw) return; /* 범례 칩(data-kw 없음)은 무시 */
       var rec = null;
       for (var i = 0; i < state.records.length; i++) {
         if (state.records[i].keyword === chip.dataset.kw) { rec = state.records[i]; break; }
