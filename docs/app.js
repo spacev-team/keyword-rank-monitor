@@ -35,11 +35,14 @@
   var BRAND_GROUPS = { brand: 1, brand_ext: 1 };
   var CHART_COLORS = ["#6B4EFF", "#14934A", "#E07C1F", "#D93838", "#2A7DE1", "#8E44AD", "#0FA3A3", "#B8860B"];
 
+  var PAGE_SIZE = 100;
+
   var state = {
     records: [],
     trends: { days: [], series: {} },
-    filters: { engine: "", area: "", group: "", status: "", keyword: "" },
+    filters: { engine: "", area: "", group: "", status: "", keyword: "", delta: "" },
     sort: { key: null, dir: 1 },
+    page: 1,
     chart: null
   };
 
@@ -80,6 +83,23 @@
     if (r.rank != null && r.prev_rank == null) return "new";
     if (r.rank == null && r.prev_rank != null) return "lost";
     return null;
+  }
+
+  /* 변동 분류 — blocked/error/parse_fail 은 '측정'이 아니므로 변동으로 치지 않는다
+     (rank=null 을 이탈로 오독 금지). "down"=하락·이탈, "up"=상승·신규, null=해당 없음 */
+  function changeKind(r) {
+    if (BAD_STATUS[r.status] === 1) return null;
+    var d = deltaOf(r);
+    if (d === "lost" || (typeof d === "number" && d < 0)) return "down";
+    if (d === "new" || (typeof d === "number" && d > 0)) return "up";
+    return null;
+  }
+
+  /* 브리핑 정렬용 변동폭 — 이탈/신규는 계단 변동보다 항상 크게 취급 */
+  function changeMagnitude(r) {
+    var d = deltaOf(r);
+    if (d === "new" || d === "lost") return 1000;
+    return typeof d === "number" ? Math.abs(d) : 0;
   }
 
   /* ---------- summary cards ---------- */
@@ -196,6 +216,61 @@
     $("summaryCards").innerHTML = html;
   }
 
+  /* ---------- change briefing ---------- */
+  /* 직전 수집 대비 변동 브리핑 — "뭐가 빠졌고 뭐가 올랐나"를 테이블 스캔 없이 바로 보여준다.
+     검색량(sv) 내림차순 → 동률이면 변동폭 큰 순으로 상위 8개만. */
+  var BRIEF_LIMIT = 8;
+
+  function briefMove(r) {
+    var d = deltaOf(r);
+    if (d === "lost") return '<span class="badge badge-lost">이탈</span>';
+    if (d === "new") return '<span class="badge badge-new">신규</span>';
+    var cls = d < 0 ? "delta-down" : "delta-up";
+    return '<span class="' + cls + '">' + r.prev_rank + "→" + r.rank + "위</span>";
+  }
+
+  function briefPanel(kind, rows) {
+    var head = kind === "down" ? "🔻 하락·이탈" : "🔺 상승·신규";
+    var html = '<div class="brief-panel brief-' + kind + '">' +
+      '<div class="brief-head">' + head + " <b>" + rows.length + "건</b></div>";
+    if (!rows.length) {
+      return html + '<div class="brief-none">변동 없음</div></div>';
+    }
+    html += '<div class="brief-list">' + rows.slice(0, BRIEF_LIMIT).map(function (r) {
+      var sv = r.sv == null ? "–" : Math.round(r.sv / 30).toLocaleString() + "/일";
+      return '<button type="button" class="brief-row" data-idx="' + r._idx + '" title="순위 추이 보기">' +
+        '<span class="brief-kw">' + esc(r.keyword) + "</span>" +
+        '<span class="brief-meta">' + (ENGINE_LABEL[r.engine] || esc(r.engine)) + "/" + (AREA_LABEL[r.area] || esc(r.area)) + "</span>" +
+        '<span class="brief-move">' + briefMove(r) + "</span>" +
+        '<span class="brief-sv" title="네이버 검색량(일평균)">검색량 ' + sv + "</span></button>";
+    }).join("") + "</div>";
+    if (rows.length > BRIEF_LIMIT) {
+      html += '<button type="button" class="brief-more" data-delta="' + kind + '">테이블에서 전체 보기 →</button>';
+    }
+    return html + "</div>";
+  }
+
+  function renderBriefing() {
+    var box = $("briefing");
+    /* 직전 런 데이터가 아예 없으면(첫 수집) 브리핑 자체를 숨긴다 */
+    var hasPrev = state.records.some(function (r) { return r.prev_rank != null; });
+    if (!hasPrev) { box.hidden = true; return; }
+
+    var byKind = { down: [], up: [] };
+    state.records.forEach(function (r) {
+      var k = changeKind(r);
+      if (k) byKind[k].push(r);
+    });
+    var bySvThenMagnitude = function (a, b) {
+      return (b.sv || 0) - (a.sv || 0) || changeMagnitude(b) - changeMagnitude(a);
+    };
+    byKind.down.sort(bySvThenMagnitude);
+    byKind.up.sort(bySvThenMagnitude);
+
+    box.innerHTML = briefPanel("down", byKind.down) + briefPanel("up", byKind.up);
+    box.hidden = false;
+  }
+
   /* ---------- sparkline ---------- */
   function sparklineSVG(engine, area, keyword) {
     var key = engine + "|" + area + "|" + keyword;
@@ -245,6 +320,9 @@
         if (BAD_STATUS[r.status] !== 1) return false;
       } else if (f.status && r.status !== f.status) return false;
       if (kw && r.keyword.toLowerCase().indexOf(kw) === -1) return false;
+      if (f.delta === "top3") {
+        if (r.rank == null || r.rank > 3) return false;
+      } else if (f.delta && changeKind(r) !== f.delta) return false;
       return true;
     });
   }
@@ -323,10 +401,17 @@
 
   function renderTable() {
     var rows = sortRecords(filteredRecords());
+    var total = rows.length;
+    var pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (state.page > pageCount) state.page = pageCount;
+    if (state.page < 1) state.page = 1;
+    var start = (state.page - 1) * PAGE_SIZE;
+    var pageRows = rows.slice(start, start + PAGE_SIZE);
+
     var body = $("tableBody");
     var html = "";
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
+    for (var i = 0; i < pageRows.length; i++) {
+      var r = pageRows[i];
       var groupBrand = isBrand(r.group);
       html += '<tr data-idx="' + r._idx + '">' +
         '<td class="kw">' + esc(r.keyword) + "</td>" +
@@ -344,8 +429,46 @@
         "</tr>";
     }
     body.innerHTML = html;
-    $("emptyMsg").hidden = rows.length > 0;
-    $("rowCount").textContent = rows.length + "건 / 전체 " + state.records.length + "건";
+    $("emptyMsg").hidden = total > 0;
+
+    var label = total === 0 ? "0건"
+      : (start + 1).toLocaleString() + "–" + (start + pageRows.length).toLocaleString() +
+        " / " + total.toLocaleString() + "건";
+    if (total !== state.records.length) label += " (전체 " + state.records.length.toLocaleString() + "건)";
+    $("rowCount").textContent = label;
+
+    renderPager(pageCount);
+  }
+
+  /* ---------- pagination ---------- */
+  /* « 이전 · 1 … 현재±2 … 끝 · 다음 » — 필터·정렬 변경 시 1페이지로 리셋 */
+  function renderPager(pageCount) {
+    var pager = $("pager");
+    if (pageCount <= 1) { pager.hidden = true; pager.innerHTML = ""; return; }
+    var cur = state.page;
+    var pages = [];
+    for (var p = 1; p <= pageCount; p++) {
+      if (p === 1 || p === pageCount || Math.abs(p - cur) <= 2) pages.push(p);
+    }
+    var html = '<button type="button" class="page-btn page-prev" data-page="' + (cur - 1) + '"' +
+      (cur === 1 ? " disabled" : "") + ">« 이전</button>";
+    var last = 0;
+    pages.forEach(function (p) {
+      if (p - last > 1) html += '<span class="page-gap">…</span>';
+      html += '<button type="button" class="page-btn' + (p === cur ? " is-current" : "") +
+        '" data-page="' + p + '"' + (p === cur ? ' aria-current="page"' : "") + ">" + p + "</button>";
+      last = p;
+    });
+    html += '<button type="button" class="page-btn page-next" data-page="' + (cur + 1) + '"' +
+      (cur === pageCount ? " disabled" : "") + ">다음 »</button>";
+    pager.innerHTML = html;
+    pager.hidden = false;
+  }
+
+  /* 필터·정렬이 바뀌면 항상 1페이지부터 */
+  function resetAndRender() {
+    state.page = 1;
+    renderTable();
   }
 
   /* ---------- modal ---------- */
@@ -502,7 +625,7 @@
       .forEach(function (pair) {
         $(pair[0]).addEventListener("change", function (e) {
           state.filters[pair[1]] = e.target.value;
-          renderTable();
+          resetAndRender();
         });
       });
 
@@ -512,7 +635,7 @@
       var v = e.target.value;
       searchTimer = setTimeout(function () {
         state.filters.keyword = v;
-        renderTable();
+        resetAndRender();
       }, 150);
     });
 
@@ -529,8 +652,46 @@
           h.classList.remove("sorted-asc", "sorted-desc");
         });
         th.classList.add(state.sort.dir === 1 ? "sorted-asc" : "sorted-desc");
-        renderTable();
+        resetAndRender();
       });
+    });
+
+    /* 변동 퀵필터 칩 — 다른 필터와 AND 조합 */
+    function setDeltaFilter(v) {
+      state.filters.delta = v;
+      document.querySelectorAll("#deltaChips .chip").forEach(function (c) {
+        c.classList.toggle("is-active", c.dataset.delta === v);
+      });
+      resetAndRender();
+    }
+    $("deltaChips").addEventListener("click", function (e) {
+      var chip = e.target.closest(".chip");
+      if (chip) setDeltaFilter(chip.dataset.delta);
+    });
+
+    /* 브리핑 패널: 행 클릭 → 추이 모달 / '전체 보기' → 해당 변동 퀵필터 + 테이블로 */
+    $("briefing").addEventListener("click", function (e) {
+      var more = e.target.closest(".brief-more");
+      if (more) {
+        setDeltaFilter(more.dataset.delta);
+        $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      var row = e.target.closest(".brief-row");
+      if (!row) return;
+      var r = state.records[Number(row.dataset.idx)];
+      if (r) openModal(r);
+    });
+
+    /* 페이저 — 페이지 이동 시 테이블 상단으로 스크롤 */
+    $("pager").addEventListener("click", function (e) {
+      var btn = e.target.closest(".page-btn");
+      if (!btn || btn.disabled) return;
+      var p = Number(btn.dataset.page);
+      if (!p || p === state.page) return;
+      state.page = p;
+      renderTable();
+      $("rankTable").scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
     $("tableBody").addEventListener("click", function (e) {
@@ -554,7 +715,7 @@
           $("fEngine").value = state.filters.engine = linkCard.dataset.engine;
           $("fArea").value = state.filters.area = linkCard.dataset.area;
           $("fStatus").value = state.filters.status = "bad";
-          renderTable();
+          resetAndRender();
           $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           openKwModal(link.dataset.group);
@@ -575,7 +736,7 @@
       if (card.classList.contains("card-blocked")) return;
       $("fEngine").value = state.filters.engine = card.dataset.engine;
       $("fArea").value = state.filters.area = card.dataset.area;
-      renderTable();
+      resetAndRender();
       $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
@@ -620,6 +781,7 @@
       state.generatedAt = latest.generated_at || "";
       $("generatedAt").textContent = "마지막 수집: " + (latest.generated_at || "–");
       renderCards();
+      renderBriefing();
       renderTable();
     }).catch(function (err) {
       $("summaryCards").innerHTML = '<div class="card card-blocked"><div class="card-blocked-msg">데이터를 불러오지 못했습니다: ' + esc(err.message) + "</div></div>";

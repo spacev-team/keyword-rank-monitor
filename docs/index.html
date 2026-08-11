@@ -21,6 +21,10 @@
     <div id="summaryCards" class="cards"></div>
   </section>
 
+  <section aria-label="변동 브리핑">
+    <div id="briefing" class="briefing" hidden></div>
+  </section>
+
   <section aria-label="필터">
     <div class="filter-bar" id="filterBar">
       <select id="fEngine" title="엔진">
@@ -53,6 +57,12 @@
         <option value="error">수집오류</option>
       </select>
       <input type="search" id="fKeyword" placeholder="키워드 검색" autocomplete="off">
+      <div class="chip-seg" id="deltaChips" role="group" aria-label="변동 퀵필터" title="직전 수집 대비 변동으로 빠르게 필터 — 차단·오류 레코드는 변동 집계에서 제외">
+        <button type="button" class="chip is-active" data-delta="">전체</button>
+        <button type="button" class="chip" data-delta="down">🔻 하락·이탈</button>
+        <button type="button" class="chip" data-delta="up">🔺 상승·신규</button>
+        <button type="button" class="chip" data-delta="top3">TOP3</button>
+      </div>
       <span id="rowCount" class="row-count"></span>
     </div>
   </section>
@@ -79,6 +89,7 @@
         <tbody id="tableBody"></tbody>
       </table>
       <div id="emptyMsg" class="empty-msg" hidden>조건에 맞는 데이터가 없습니다.</div>
+      <nav id="pager" class="pager" aria-label="페이지" hidden></nav>
       <p class="table-legend">
         <strong>네이버 검색량/일</strong> = 네이버 키워드도구 최근 30일 검색수 ÷ 30 (엔진 무관 네이버 기준, 셀에 마우스 올리면 30일 총량) ·
         <strong>순위</strong> 1위 / 20 = 확인한 20개 결과 중 1위, 권외 / 20 = 20개 안에 미노출 ·
