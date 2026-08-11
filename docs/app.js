@@ -317,7 +317,7 @@
   function svCell(r) {
     if (r.sv == null) return '<span class="delta-flat">–</span>';
     var daily = Math.round(r.sv / 30);
-    return '<span class="sv-val" title="최근 30일 총 ' + r.sv.toLocaleString() + '회">' +
+    return '<span class="sv-val" title="네이버 최근 30일 총 ' + r.sv.toLocaleString() + '회">' +
       daily.toLocaleString() + "</span>";
   }
 
