@@ -1,7 +1,7 @@
 # keyword-rank-monitor — 삼삼엠투 키워드 순위 모니터링
 
 브랜드 키워드(30 + 확장 39) + 검색광고 매출 상위 일반 키워드(171) = **240개 키워드**가
-**네이버 · 구글 · 다음 · Play Store · App Store** 에서 몇 위에 노출되는지 매일 4회 수집한다.
+**네이버 · 구글 · 다음 · Play Store · App Store** 에서 몇 위에 노출되는지 매일 1회 수집한다.
 네이버/구글/다음은 **검색광고(ad)와 오가닉(organic)을 분리 측정**한다.
 
 **대시보드**: https://spacev-team.github.io/keyword-rank-monitor/ (매 수집 런 종료 시 자동 갱신)
@@ -18,8 +18,7 @@ GitHub Actions cron(스케줄 내장) → 러너(수집)
 
 | 스케줄(KST) | mode | 엔진 |
 |---|---|---|
-| 07:37 | `daily` | 네이버·**구글**·다음·플레이·앱스토어 (구글은 하루 1회만) |
-| 11:37 / 16:37 / 21:37 | `core` | 구글 제외 4개 엔진 |
+| 12:37 (매일 1회) | `daily` | 네이버·**구글**·다음·플레이·앱스토어 (구글은 월요일만) |
 
 GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/scheduling.md`](ops/scheduling.md).
 
@@ -55,7 +54,7 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 ```
 pip install -r requirements.txt
 python run.py --mode daily                  # 구글 포함 전체
-python run.py --mode core                   # 구글 제외
+python run.py --mode core                   # 구글 제외(수동 점검용)
 python run.py --keywords 삼삼엠투,단기임대 --dry-run   # 스모크 테스트
 python run.py --export-csv out.csv          # 이력 CSV(엑셀 호환 BOM)
 python export_dashboard.py                  # docs/data/*.json 재생성

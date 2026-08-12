@@ -8,12 +8,11 @@ run-name: collect ${{ inputs.mode || 'scheduled' }}
 # 있음(추세 프록시 용도라 허용). 분값 37 = 정시/30분 혼잡 회피(지연 완화).
 on:
   schedule:
-    - cron: "37 22 * * *"      # 07:37 KST — daily(구글 포함 전체)
-    - cron: "37 2,7,12 * * *"  # 11:37/16:37/21:37 KST — core(구글 제외)
+    - cron: "37 3 * * *"   # 12:37 KST — daily(구글 포함 전체, 하루 1회)
   workflow_dispatch:
     inputs:
       mode:
-        description: "daily(구글 포함 전체) | core(구글 제외) | probe(러너 IP 봇차단 점검 dry-run, 저장 없음)"
+        description: "daily(구글 포함 전체) | core(구글 제외, 수동 점검용) | probe(러너 IP 봇차단 점검 dry-run, 저장 없음)"
         required: true
         type: choice
         options: [daily, core, probe]
@@ -35,15 +34,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90   # 240키워드 × 4~5엔진 순차(봇차단 회피 대기 포함) ≈ 45~60분
     steps:
-      # schedule 이벤트는 inputs 가 없다 — cron 시각(UTC 22시대 = daily)으로 모드 결정.
+      # schedule 이벤트는 inputs 가 없다 — 스케줄 런은 항상 daily(하루 1회 전체 수집).
+      # core 는 수동 점검용(workflow_dispatch)으로만 남는다.
       - name: Resolve mode
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODE="${{ inputs.mode }}"
-          elif [ "$(date -u +%H)" = "22" ]; then
-            MODE=daily
           else
-            MODE=core
+            MODE=daily
           fi
           echo "MODE=$MODE" >> "$GITHUB_ENV"
           echo "mode=$MODE"

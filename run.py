@@ -30,7 +30,7 @@ REGISTRY: dict[str, tuple[str, str]] = {
 }
 
 # 스케줄 모드 — 구글은 봇차단 민감·SerpAPI 비용 문제로 하루 1회만(사용자 확정 2026-08-06).
-#   core  = 하루 3회(구글 제외) / daily = 하루 1회(구글 포함, 아침 첫 런)
+#   daily = 스케줄 런(매일 12:37 KST, 구글 포함 전체) / core = 수동 점검용(구글 제외)
 MODES: dict[str, list[str]] = {
     "core": ["naver", "daum", "playstore", "appstore"],
     "daily": ["naver", "google", "daum", "playstore", "appstore"],
@@ -157,7 +157,7 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="전체 엔진 실행")
     ap.add_argument("--engines", help="쉼표 구분: " + ",".join(REGISTRY))
     ap.add_argument("--mode", choices=list(MODES),
-                    help="스케줄 모드: core(구글 제외, 1일 3회) | daily(구글 포함, 1일 1회)")
+                    help="스케줄 모드: daily(구글 포함 전체, 매일 1회) | core(구글 제외, 수동 점검용)")
     ap.add_argument("--group", choices=["brand", "generic", "all"], default="all",
                     help="키워드 그룹 필터(brand = brand+brand_ext)")
     ap.add_argument("--keywords", help="쉼표 구분 임시 키워드(그룹 필터 무시)")
