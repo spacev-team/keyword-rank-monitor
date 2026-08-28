@@ -573,3 +573,11 @@ td.mx .mx-tot { font-size: 0.66em; }
   .matrix-section .matrix-wrap { overflow-x: auto; }
   table.matrix { table-layout: auto; }
 }
+
+/* 정렬 가능한 열 제목 */
+table.matrix thead th.sortable { cursor: pointer; user-select: none; }
+table.matrix thead th.sortable:hover { background: #E9E5FB; }
+table.matrix thead th.cmp-h.sortable:hover { background: #DED7F7; }
+table.matrix thead th.is-sorted { color: var(--accent-dark); box-shadow: inset 0 -2px 0 var(--accent); }
+.sort-ind { font-size: 0.7em; }
+.sort-ind.dim { opacity: 0.22; }

@@ -65,7 +65,7 @@
     records: [],
     trends: { days: [], series: {} },
     filters: { keyword: "", category: "" },
-    sort: "cat",
+    sort: { key: "category", dir: 1 },
     view: "status",
     chart: null,
     generatedAt: ""
@@ -320,26 +320,45 @@
       m.channels[r.engine + "|" + r.area] = r;
     });
     var rows = Object.keys(byKw).map(function (k) { return byKw[k]; });
-    rows.sort(function (a, b) {
-      var sa = a.sv == null ? -1 : a.sv, sb = b.sv == null ? -1 : b.sv;
-      if (state.sort === "sv_asc") {
-        // 검색량 낮은순(검색량 미확인은 항상 하단)
-        if (sa === sb) return a.keyword.localeCompare(b.keyword, "ko");
-        if (sa < 0) return 1;
-        if (sb < 0) return -1;
-        return sa - sb;
-      }
-      if (state.sort === "sv_desc") {
-        if (sa !== sb) return sb - sa;
-        return a.keyword.localeCompare(b.keyword, "ko");
-      }
-      // 기본: 구분별 → 검색량 desc → 키워드
+    rows.sort(rowComparator);
+    return rows;
+  }
+
+  /* 정렬 키 → 숫자값(작을수록 상위). null = 데이터 없음(항상 하단). */
+  function sortNum(row, key) {
+    if (key === "sv") return row.sv == null ? null : row.sv;
+    if (key === "imp") return CATEGORIES[row.category].stars;
+    if (key.indexOf("cmp_") === 0) {
+      var comp = null;
+      for (var i = 0; i < COMPOSITES.length; i++) if (COMPOSITES[i].id === key.slice(4)) comp = COMPOSITES[i];
+      if (!comp) return null;
+      var c = composite(row.channels, comp);
+      return c ? c.value : null;
+    }
+    // 채널 key(engine|area) → 순위(측정제외·미노출·수집이상 = null)
+    var rec = row.channels[key];
+    if (!rec || rec.rank == null) return null;
+    return rec.rank;
+  }
+
+  function rowComparator(a, b) {
+    var s = state.sort, k = s.key, dir = s.dir;
+    if (k === "category") {
+      // 구분별 그룹 보기 — 구분(dir) → 검색량 desc → 키워드
       var ca = CATEGORIES[a.category].order, cb = CATEGORIES[b.category].order;
-      if (ca !== cb) return ca - cb;
+      if (ca !== cb) return dir * (ca - cb);
+      var sa = a.sv == null ? -1 : a.sv, sb = b.sv == null ? -1 : b.sv;
       if (sa !== sb) return sb - sa;
       return a.keyword.localeCompare(b.keyword, "ko");
-    });
-    return rows;
+    }
+    if (k === "keyword") return dir * a.keyword.localeCompare(b.keyword, "ko");
+    var va = sortNum(a, k), vb = sortNum(b, k);
+    var na = va == null, nb = vb == null;
+    if (na && nb) return a.keyword.localeCompare(b.keyword, "ko");
+    if (na) return 1;   // 데이터 없음은 방향과 무관하게 항상 하단
+    if (nb) return -1;
+    if (va !== vb) return dir * (va - vb);
+    return a.keyword.localeCompare(b.keyword, "ko");
   }
 
   function applyFilters(rows) {
@@ -445,22 +464,40 @@
       '<span class="cmp-val">' + c.value.toFixed(1) + "</span></td>";
   }
 
+  function sortArrow(key) {
+    if (state.sort.key !== key) return ' <span class="sort-ind dim">↕</span>';
+    return state.sort.dir === 1 ? ' <span class="sort-ind">▲</span>' : ' <span class="sort-ind">▼</span>';
+  }
+
+  function thCell(key, cls, label, title) {
+    var active = state.sort.key === key;
+    return '<th class="mx-h sortable ' + cls + (active ? " is-sorted" : "") + '" data-sort="' + key + '"' +
+      (title ? ' title="' + esc(title) + '"' : "") + ">" + esc(label) + sortArrow(key) + "</th>";
+  }
+
   function renderHead() {
     var chHtml = CHANNELS.map(function (c) {
-      return '<th class="mx-h ch-' + c.grp + (c.excluded ? " excluded" : "") + '">' + esc(c.label) + "</th>";
+      var active = state.sort.key === c.key;
+      return '<th class="mx-h sortable ch-' + c.grp + (c.excluded ? " excluded" : "") + (active ? " is-sorted" : "") +
+        '" data-sort="' + c.key + '">' + esc(c.label) + sortArrow(c.key) + "</th>";
     }).join("");
     var cmpHtml = COMPOSITES.map(function (c) {
-      return '<th class="mx-h cmp-h" title="' + esc(c.note) + '"><span class="cmp-h-t">' + esc(c.label) +
+      var key = "cmp_" + c.id, active = state.sort.key === key;
+      return '<th class="mx-h sortable cmp-h' + (active ? " is-sorted" : "") + '" data-sort="' + key +
+        '" title="' + esc(c.note) + '"><span class="cmp-h-t">' + esc(c.label) + sortArrow(key) +
         '</span><span class="cmp-h-n">' + esc(c.note) + "</span></th>";
     }).join("");
     $("matrixHead").innerHTML =
-      '<tr>' +
-      '<th class="mx-h col-cat">구분</th>' +
-      '<th class="mx-h col-kw">키워드</th>' +
-      '<th class="mx-h col-imp" title="구분별 목표 티어(★★★ 방어 / ★★ 확대 / ★ 진입)">중요도</th>' +
-      '<th class="mx-h col-sv num" title="네이버 키워드도구 최근 30일 검색수 ÷ 30 = 일평균">네이버 검색량/일</th>' +
+      "<tr>" +
+      thCell("category", "col-cat", "구분", "구분별 그룹 보기 · 클릭 시 순서 전환") +
+      thCell("keyword", "col-kw", "키워드", "가나다순 정렬") +
+      thCell("imp", "col-imp", "중요도", "구분별 목표 티어(★★★ 방어 / ★★ 확대 / ★ 진입)") +
+      thCell("sv", "col-sv num", "네이버 검색량/일", "네이버 키워드도구 최근 30일 검색수 ÷ 30 = 일평균") +
       chHtml + cmpHtml + "</tr>";
   }
+
+  /* 첫 클릭 방향: 검색량·중요도는 큰 값 우선(내림), 순위·키워드·구분은 오름 */
+  function defaultDir(key) { return (key === "sv" || key === "imp") ? -1 : 1; }
 
   function stars(cat) {
     var n = CATEGORIES[cat].stars;
@@ -474,7 +511,7 @@
     var rows = applyFilters(buildRows());
     var body = $("matrixBody");
     var trend = state.view === "trend";
-    var grouped = state.sort === "cat";
+    var grouped = state.sort.key === "category";
     var html = "";
     var lastCat = null;
     for (var i = 0; i < rows.length; i++) {
@@ -681,8 +718,12 @@
       renderMatrix();
     });
 
-    $("sortSel").addEventListener("change", function (e) {
-      state.sort = e.target.value;
+    $("matrixHead").addEventListener("click", function (e) {
+      var th = e.target.closest("th[data-sort]");
+      if (!th) return;
+      var key = th.dataset.sort;
+      if (state.sort.key === key) state.sort.dir = -state.sort.dir;
+      else state.sort = { key: key, dir: defaultDir(key) };
       renderMatrix();
     });
 

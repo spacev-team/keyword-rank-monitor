@@ -84,12 +84,22 @@ GENERIC_KEYWORDS: list[str] = [
 #   대시보드 '키워드 × 채널 장악 Matrix'의 Competitor 그룹으로 분류된다.
 #   비우면 Competitor 행은 표시되지 않는다(수집 대상에서도 제외).
 COMPETITOR_KEYWORDS: list[str] = [
-    "에어비앤비", "리브애니웨어",
+    "air bnb", "dabang", "gobang", "gosiwon", "jikbang", "livanywhere",
+    "peterpan", "spacecloud", "stayfolio", "tabang", "zikbang", "zipbang",
+    "ziptoss", "enkostay",
+    "고방", "고시원", "네이버 부동산", "다방", "달방", "독립생활",
+    "리브애니", "리브애니웨어", "미멘", "미스터멘션", "미스터홈즈", "부동산앱",
+    "스테이폴리오", "스폴", "에어비앤비", "에어비엔비", "위홈", "지냄",
+    "직방", "집토스", "피터팬", "피터팬의 좋은방 구하기", "호갱노노", "호텔에삶",
+    "엔코스테이", "자리톡", "단단홈즈", "플라트라이프",
 ]
 
 
 def all_keywords() -> list[tuple[str, str]]:
-    """(keyword, kw_group) 목록 — 순서 유지·중복 제거. group ∈ brand|brand_ext|generic|competitor."""
+    """(keyword, kw_group) 목록 — 순서 유지·중복 제거. group ∈ brand|brand_ext|generic|competitor.
+    경쟁사 목록에 있는 키워드는 다른 그룹(예: generic '고시원'·'달방')에 있어도 competitor 로만
+    분류한다 — 대시보드 구분이 사용자 의도(Competitor)와 어긋나지 않도록 선점을 막는다."""
+    comp_set = set(COMPETITOR_KEYWORDS)
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for kw_list, group in ((BRAND_KEYWORDS, "brand"),
@@ -97,9 +107,12 @@ def all_keywords() -> list[tuple[str, str]]:
                            (GENERIC_KEYWORDS, "generic"),
                            (COMPETITOR_KEYWORDS, "competitor")):
         for kw in kw_list:
-            if kw not in seen:
-                seen.add(kw)
-                out.append((kw, group))
+            if kw in seen:
+                continue
+            if group != "competitor" and kw in comp_set:
+                continue  # competitor 로 분류하기 위해 앞선 그룹에서 건너뜀
+            seen.add(kw)
+            out.append((kw, group))
     return out
 
 

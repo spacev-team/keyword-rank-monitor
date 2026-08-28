@@ -29,7 +29,7 @@
     <div class="matrix-head">
       <div class="matrix-titles">
         <h2 class="matrix-title">키워드 × 채널 장악 Matrix</h2>
-        <span class="matrix-sub">검색량이 높은 키워드를 위쪽에 배치 · 행/셀 클릭 시 순위 추이</span>
+        <span class="matrix-sub">검색량이 높은 키워드를 위쪽에 배치 · 열 제목 클릭 시 정렬(오름/내림) · 행/셀 클릭 시 순위 추이</span>
       </div>
       <div class="matrix-controls">
         <div class="seg" id="viewSeg" role="group" aria-label="보기 전환" title="장악 현황(현재 순위) ↔ 순위 Trend(전일 대비 변동)">
@@ -41,11 +41,6 @@
           <option value="brand">Brand</option>
           <option value="category">Category</option>
           <option value="competitor">Competitor</option>
-        </select>
-        <select id="sortSel" title="정렬">
-          <option value="cat">구분별 · 검색량순</option>
-          <option value="sv_desc">검색량 높은순</option>
-          <option value="sv_asc">검색량 낮은순</option>
         </select>
         <input type="search" id="fKeyword" placeholder="키워드 검색" autocomplete="off">
         <span id="rowCount" class="row-count"></span>
