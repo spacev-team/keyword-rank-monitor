@@ -33,7 +33,6 @@
   var CHANNELS = [
     { key: "naver|ad", engine: "naver", area: "ad", label: "네이버 광고", grp: "ad" },
     { key: "naver|organic", engine: "naver", area: "organic", label: "네이버 오가닉", grp: "organic" },
-    { key: "google|ad", engine: "google", area: "ad", label: "구글 광고", grp: "ad", excluded: true },
     { key: "google|organic", engine: "google", area: "organic", label: "구글 SEO", grp: "organic" },
     { key: "appstore|app", engine: "appstore", area: "app", label: "App Store", grp: "app" },
     { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play", grp: "app" },
@@ -45,8 +44,8 @@
 
   /* ── 종합(가중 평균 순위) 정의 — 측정된 채널만으로 가중치 재정규화(사용자 확정) ── */
   var COMPOSITES = [
-    { id: "ad", label: "광고 종합", note: "네이버 0.5 · 구글 0.4 · 다음 0.1",
-      weights: [["naver|ad", 0.5], ["google|ad", 0.4], ["daum|ad", 0.1]] },
+    { id: "ad", label: "광고 종합", note: "네이버 0.8 · 다음 0.2",
+      weights: [["naver|ad", 0.8], ["daum|ad", 0.2]] },
     { id: "organic", label: "오가닉 종합", note: "네이버 0.4 · 구글 0.5 · 다음 0.1",
       weights: [["naver|organic", 0.4], ["google|organic", 0.5], ["daum|organic", 0.1]] },
     { id: "app", label: "앱 종합", note: "플레이스토어 0.5 · 앱스토어 0.5",
