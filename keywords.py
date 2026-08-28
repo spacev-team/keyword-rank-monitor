@@ -84,10 +84,10 @@ GENERIC_KEYWORDS: list[str] = [
 #   대시보드 '키워드 × 채널 장악 Matrix'의 Competitor 그룹으로 분류된다.
 #   비우면 Competitor 행은 표시되지 않는다(수집 대상에서도 제외).
 COMPETITOR_KEYWORDS: list[str] = [
-    "air bnb", "dabang", "gobang", "gosiwon", "jikbang", "livanywhere",
+    "air bnb", "dabang", "gobang", "jikbang", "livanywhere",
     "peterpan", "spacecloud", "stayfolio", "tabang", "zikbang", "zipbang",
     "ziptoss", "enkostay",
-    "고방", "고시원", "네이버 부동산", "다방", "달방", "독립생활",
+    "고방", "네이버 부동산", "다방", "달방", "독립생활",
     "리브애니", "리브애니웨어", "미멘", "미스터멘션", "미스터홈즈", "부동산앱",
     "스테이폴리오", "스폴", "에어비앤비", "에어비엔비", "위홈", "지냄",
     "직방", "집토스", "피터팬", "피터팬의 좋은방 구하기", "호갱노노", "호텔에삶",
