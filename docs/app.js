@@ -17,13 +17,6 @@
     parse_fail: "구조변경 의심",
     error: "수집오류"
   };
-  var RANK_NONE_LABEL = {
-    not_found: "미노출",
-    no_section: "광고없음",
-    blocked: "차단",
-    parse_fail: "확인필요",
-    error: "오류"
-  };
   /* 구글 광고는 측정 제외(유료 SerpAPI 없이 측정 불가 — 사용자 확정 2026-08-07) */
   var CARD_CELLS = [
     ["naver", "ad"], ["naver", "organic"],
@@ -35,15 +28,47 @@
   var BRAND_GROUPS = { brand: 1, brand_ext: 1 };
   var CHART_COLORS = ["#6B4EFF", "#14934A", "#E07C1F", "#D93838", "#2A7DE1", "#8E44AD", "#0FA3A3", "#B8860B"];
 
-  var PAGE_SIZE = 100;
+  /* ── 매트릭스 채널(열) 정의 — 목업 순서 그대로 ──
+     excluded=true 는 상시 측정 제외(구글 광고). key = engine|area 로 records 조인. */
+  var CHANNELS = [
+    { key: "naver|ad", engine: "naver", area: "ad", label: "네이버 광고", grp: "ad" },
+    { key: "naver|organic", engine: "naver", area: "organic", label: "네이버 오가닉", grp: "organic" },
+    { key: "google|ad", engine: "google", area: "ad", label: "구글 광고", grp: "ad", excluded: true },
+    { key: "google|organic", engine: "google", area: "organic", label: "구글 SEO", grp: "organic" },
+    { key: "appstore|app", engine: "appstore", area: "app", label: "App Store", grp: "app" },
+    { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play", grp: "app" },
+    { key: "daum|ad", engine: "daum", area: "ad", label: "다음 광고", grp: "ad" },
+    { key: "daum|organic", engine: "daum", area: "organic", label: "다음 오가닉", grp: "organic" }
+  ];
+  var CHANNEL_BY_KEY = {};
+  CHANNELS.forEach(function (c) { CHANNEL_BY_KEY[c.key] = c; });
+
+  /* ── 종합(가중 평균 순위) 정의 — 측정된 채널만으로 가중치 재정규화(사용자 확정) ── */
+  var COMPOSITES = [
+    { id: "ad", label: "광고 종합", note: "네이버 0.5 · 구글 0.4 · 다음 0.1",
+      weights: [["naver|ad", 0.5], ["google|ad", 0.4], ["daum|ad", 0.1]] },
+    { id: "organic", label: "오가닉 종합", note: "네이버 0.4 · 구글 0.5 · 다음 0.1",
+      weights: [["naver|organic", 0.4], ["google|organic", 0.5], ["daum|organic", 0.1]] },
+    { id: "app", label: "앱 종합", note: "플레이스토어 0.5 · 앱스토어 0.5",
+      weights: [["playstore|app", 0.5], ["appstore|app", 0.5]] }
+  ];
+
+  /* ── 구분(카테고리) 메타 — 사용자 정의 3분류(2026-08-28) ──
+     Brand=검색 방어(1위 필수) · Category=신규 확보(TOP3) · Competitor=대안 탐색(TOP10).
+     중요도 별점은 이 목표 티어를 반영(★★★/★★/★) — 조정하려면 stars 만 바꾸면 된다. */
+  var CATEGORIES = {
+    brand: { order: 0, label: "Brand", cls: "cat-brand", stars: 3, goal: "검색 결과 방어 · 1위 필수" },
+    category: { order: 1, label: "Category", cls: "cat-category", stars: 2, goal: "신규 고객 확보 · TOP3 확대" },
+    competitor: { order: 2, label: "Competitor / Alternative", cls: "cat-competitor", stars: 1, goal: "대안 탐색 고객 확보 · TOP10 진입" }
+  };
 
   var state = {
     records: [],
     trends: { days: [], series: {} },
-    filters: { engine: "", area: "", group: "", status: "", keyword: "", delta: "" },
-    sort: { key: null, dir: 1 },
-    page: 1,
-    chart: null
+    filters: { keyword: "", category: "" },
+    view: "status",
+    chart: null,
+    generatedAt: ""
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -56,8 +81,14 @@
 
   function isBrand(group) { return BRAND_GROUPS[group] === 1; }
 
-  /* 해당 키워드의 실제 검색결과 페이지 URL — 측정 방법론과 같은 대상(네이버·다음=PC 통합
-     검색, 구글=ko/kr). 앱스토어는 공식 웹 검색결과 페이지가 없어 apple.com 통합검색으로 폴백. */
+  /* group → 매트릭스 구분(brand|category|competitor) */
+  function categoryOf(group) {
+    if (isBrand(group)) return "brand";
+    if (group === "competitor") return "competitor";
+    return "category";
+  }
+
+  /* 해당 키워드의 실제 검색결과 페이지 URL — 측정 방법론과 같은 대상. */
   function serpUrl(engine, keyword) {
     var q = encodeURIComponent(keyword);
     switch (engine) {
@@ -70,13 +101,6 @@
     return null;
   }
 
-  function goBtn(engine, keyword) {
-    var url = serpUrl(engine, keyword);
-    if (!url) return "–";
-    return '<a class="go-btn" href="' + esc(url) + '" target="_blank" rel="noopener" ' +
-      'title="' + (ENGINE_LABEL[engine] || esc(engine)) + ' 검색결과 새 탭에서 열기">보러가기</a>';
-  }
-
   /* delta value: >0 up, <0 down, 0 flat, "new", "lost", null n/a */
   function deltaOf(r) {
     if (r.rank != null && r.prev_rank != null) return r.prev_rank - r.rank;
@@ -85,8 +109,7 @@
     return null;
   }
 
-  /* 변동 분류 — blocked/error/parse_fail 은 '측정'이 아니므로 변동으로 치지 않는다
-     (rank=null 을 이탈로 오독 금지). "down"=하락·이탈, "up"=상승·신규, null=해당 없음 */
+  /* blocked/error/parse_fail 은 '측정'이 아니므로 변동으로 치지 않는다. */
   function changeKind(r) {
     if (BAD_STATUS[r.status] === 1) return null;
     var d = deltaOf(r);
@@ -95,15 +118,24 @@
     return null;
   }
 
-  /* 브리핑 정렬용 변동폭 — 이탈/신규는 계단 변동보다 항상 크게 취급 */
   function changeMagnitude(r) {
     var d = deltaOf(r);
     if (d === "new" || d === "lost") return 1000;
     return typeof d === "number" ? Math.abs(d) : 0;
   }
 
+  /* rank → 색 등급: 1~3 green / 4~10 yellow / 11+ red */
+  function rankClass(rank) {
+    if (rank == null) return "r";
+    if (rank <= 3) return "g";
+    if (rank <= 10) return "y";
+    return "r";
+  }
+
+  function dailySv(sv) { return sv == null ? null : Math.round(sv / 30); }
+  function fmt(n) { return n == null ? "–" : n.toLocaleString(); }
+
   /* ---------- summary cards ---------- */
-  /* 카드에 순위를 직표시할 핵심 키워드(사용자 확정) — 데이터상 표기와 일치해야 매칭된다 */
   var PINNED_KEYWORDS = ["삼삼엠투", "33M2", "단기임대"];
 
   function countDelta(now, prev) {
@@ -113,10 +145,6 @@
     return "";
   }
 
-  /* 엔진별 데이터 시점 배지 — 최신 수집이 차단되면 대시보드는 '마지막 정상 런'을
-     보여주므로(export_dashboard.py), 헤더의 마지막 수집 시각과 카드 데이터 시점이
-     어긋날 수 있다(2026-08-07 사용자 혼동: 수정 전 데이터가 최신처럼 보임).
-     6시간 이상 낡으면 시점을 명시해 오독을 막는다. */
   function staleTag(rs) {
     if (!rs.length || !state.generatedAt) return "";
     var newest = "";
@@ -128,6 +156,24 @@
     var d = newest.slice(5, 16).replace("-", "/");
     return '<span class="stale-tag" title="이후 수집이 차단되어 마지막 정상 수집 데이터를 표시 중 — 다음 정상 수집 시 자동 갱신">' +
       d + " 데이터</span>";
+  }
+
+  function rankCell(r) {
+    var suffix = r.total > 0 ? ' <span class="rank-total">/ ' + r.total + "</span>" : "";
+    if (r.rank != null) return '<span class="rank-val">' + r.rank + "위</span>" + suffix;
+    var label = { not_found: "미노출", no_section: "광고없음", blocked: "차단", parse_fail: "확인필요", error: "오류" }[r.status] || "–";
+    return '<span class="rank-none s-' + esc(r.status) + '">' + label + "</span>" +
+      (r.status === "not_found" ? suffix : "");
+  }
+
+  function deltaCell(r) {
+    var d = deltaOf(r);
+    if (d === "new") return '<span class="badge badge-new">신규</span>';
+    if (d === "lost") return '<span class="badge badge-lost">이탈</span>';
+    if (d === null) return '<span class="delta-flat">–</span>';
+    if (d > 0) return '<span class="delta-up">▲ ' + d + "</span>";
+    if (d < 0) return '<span class="delta-down">▼ ' + (-d) + "</span>";
+    return '<span class="delta-flat">–</span>';
   }
 
   function renderCards() {
@@ -145,18 +191,14 @@
           '<div class="card-rows"><div class="card-row"><span>수집 레코드</span><b>' + rs.length + "개</b></div></div></div>";
       }
 
-      /* 첫 수집처럼 직전 런 데이터가 아예 없으면 증감 표시를 전부 숨긴다 */
       var hasPrev = rs.some(function (r) { return r.prev_rank != null; });
 
-      /* 핵심 키워드 현재 순위 + 변동 */
       var pinned = PINNED_KEYWORDS.map(function (kw) {
         var r = null;
         for (var i = 0; i < rs.length; i++) {
           if (rs[i].keyword === kw) { r = rs[i]; break; }
         }
         if (!r) {
-          /* 구글은 일반 키워드를 수집하지 않아 카드 간 구성이 어긋난다 →
-             빈칸 대신 '측정 제외'로 이유를 보여줘 구성을 통일 */
           return '<div class="card-kw-row is-excluded" title="이 엔진에서는 측정하지 않는 키워드(무료 API 쿼터로 브랜드만 수집)">' +
             '<span class="card-kw">' + esc(kw) + "</span>" +
             '<span class="card-val"><span class="delta-flat">측정 제외</span></span></div>';
@@ -166,7 +208,6 @@
           '<span class="card-val">' + rankCell(r) + (hasPrev ? deltaCell(r) : "") + "</span></div>";
       }).join("");
 
-      /* 노출 수치 + 전회 대비 증감 */
       function exposure(sub) {
         if (!sub.length) return '<span class="card-val" title="무료 API 쿼터 때문에 구글은 브랜드 키워드만 수집"><span class="delta-flat">측정 제외</span></span>';
         var now = sub.filter(function (r) { return r.rank != null; }).length;
@@ -180,7 +221,6 @@
       var top3prev = rs.filter(function (r) { return r.prev_rank != null && r.prev_rank <= 3; }).length;
       var bad = rs.filter(function (r) { return BAD_STATUS[r.status] === 1; }).length;
 
-      /* 전회 대비 하락/이탈 한 줄 — 조치가 필요한 변화만 노출 */
       var dropLine = "";
       if (hasPrev) {
         var worst = null;
@@ -201,15 +241,14 @@
         }
       }
 
-      return '<div class="card card-clickable" data-engine="' + engine + '" data-area="' + area +
-        '" title="클릭: 아래 테이블을 이 엔진·영역으로 필터">' + title +
+      return '<div class="card" data-engine="' + engine + '" data-area="' + area + '">' + title +
         (pinned ? '<div class="card-kws">' + pinned + "</div>" : "") +
         '<div class="card-rows">' +
         '<div class="card-row"><span class="kw-group-link" data-group="brand" title="키워드 목록 보기">브랜드 노출</span>' + exposure(brand) + "</div>" +
         '<div class="card-row"><span class="kw-group-link" data-group="generic" title="키워드 목록 보기">일반 노출</span>' + exposure(generic) + "</div>" +
         '<div class="card-row"><span class="kw-group-link top3-link" title="TOP3 설명·키워드 보기">TOP3</span><span class="card-val"><b>' + top3 + "개</b>" +
         (hasPrev ? countDelta(top3, top3prev) : "") + "</span></div>" +
-        '<div class="card-row"><span class="kw-group-link bad-link" title="수집이상 레코드를 테이블에서 보기">수집이상</span>' +
+        '<div class="card-row"><span class="top3-plain">수집이상</span>' +
         (bad > 0 ? '<b class="bad-count">' + bad + "건</b>" : "<b>0건</b>") +
         "</div></div>" + dropLine + "</div>";
     }).join("");
@@ -217,8 +256,6 @@
   }
 
   /* ---------- change briefing ---------- */
-  /* 직전 수집 대비 변동 브리핑 — "뭐가 빠졌고 뭐가 올랐나"를 테이블 스캔 없이 바로 보여준다.
-     검색량(sv) 내림차순 → 동률이면 변동폭 큰 순으로 상위 8개만. */
   var BRIEF_LIMIT = 8;
 
   function briefMove(r) {
@@ -237,22 +274,18 @@
       return html + '<div class="brief-none">변동 없음</div></div>';
     }
     html += '<div class="brief-list">' + rows.slice(0, BRIEF_LIMIT).map(function (r) {
-      var sv = r.sv == null ? "–" : Math.round(r.sv / 30).toLocaleString() + "/일";
+      var sv = dailySv(r.sv);
       return '<button type="button" class="brief-row" data-idx="' + r._idx + '" title="순위 추이 보기">' +
         '<span class="brief-kw">' + esc(r.keyword) + "</span>" +
         '<span class="brief-meta">' + (ENGINE_LABEL[r.engine] || esc(r.engine)) + "/" + (AREA_LABEL[r.area] || esc(r.area)) + "</span>" +
         '<span class="brief-move">' + briefMove(r) + "</span>" +
-        '<span class="brief-sv" title="네이버 검색량(일평균)">검색량 ' + sv + "</span></button>";
+        '<span class="brief-sv" title="네이버 검색량(일평균)">검색량 ' + (sv == null ? "–" : fmt(sv) + "/일") + "</span></button>";
     }).join("") + "</div>";
-    if (rows.length > BRIEF_LIMIT) {
-      html += '<button type="button" class="brief-more" data-delta="' + kind + '">테이블에서 전체 보기 →</button>';
-    }
     return html + "</div>";
   }
 
   function renderBriefing() {
     var box = $("briefing");
-    /* 직전 런 데이터가 아예 없으면(첫 수집) 브리핑 자체를 숨긴다 */
     var hasPrev = state.records.some(function (r) { return r.prev_rank != null; });
     if (!hasPrev) { box.hidden = true; return; }
 
@@ -271,207 +304,210 @@
     box.hidden = false;
   }
 
-  /* ---------- sparkline ---------- */
-  function sparklineSVG(engine, area, keyword) {
-    var key = engine + "|" + area + "|" + keyword;
-    var series = state.trends.series[key];
-    if (!series || !series.some(function (v) { return v != null; })) {
-      return '<span class="spark-empty">–</span>';
-    }
-    var W = 90, H = 26, PAD = 3;
-    var vals = series.filter(function (v) { return v != null; });
-    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-    if (min === max) { min -= 1; max += 1; }
-    var n = series.length;
-    var x = function (i) { return n === 1 ? W / 2 : PAD + (i * (W - 2 * PAD)) / (n - 1); };
-    /* rank axis inverted: rank 1 (best) at top */
-    var y = function (v) { return PAD + ((v - min) * (H - 2 * PAD)) / (max - min); };
-
-    var parts = [], seg = [];
-    for (var i = 0; i < n; i++) {
-      if (series[i] == null) {
-        if (seg.length) { parts.push(seg); seg = []; }
-      } else {
-        seg.push([x(i), y(series[i])]);
+  /* ---------- matrix ---------- */
+  /* records → 키워드별 { keyword, group, category, sv, channels{key:rec} } (검색량 desc, 구분 순) */
+  function buildRows() {
+    var byKw = {};
+    state.records.forEach(function (r) {
+      var m = byKw[r.keyword];
+      if (!m) {
+        m = byKw[r.keyword] = {
+          keyword: r.keyword, group: r.group, category: categoryOf(r.group),
+          sv: r.sv == null ? null : r.sv, channels: {}
+        };
       }
-    }
-    if (seg.length) parts.push(seg);
-
-    var body = parts.map(function (p) {
-      if (p.length === 1) {
-        return '<circle cx="' + p[0][0].toFixed(1) + '" cy="' + p[0][1].toFixed(1) + '" r="2.2"/>';
-      }
-      var pts = p.map(function (q) { return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
-      return '<polyline points="' + pts + '"/>';
-    }).join("");
-    return '<svg class="spark" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H + '" aria-hidden="true">' + body + "</svg>";
-  }
-
-  /* ---------- table ---------- */
-  function filteredRecords() {
-    var f = state.filters;
-    var kw = f.keyword.trim().toLowerCase();
-    return state.records.filter(function (r) {
-      if (f.engine && r.engine !== f.engine) return false;
-      if (f.area && r.area !== f.area) return false;
-      if (f.group === "brand" && !isBrand(r.group)) return false;
-      if (f.group === "generic" && isBrand(r.group)) return false;
-      if (f.status === "bad") {
-        if (BAD_STATUS[r.status] !== 1) return false;
-      } else if (f.status && r.status !== f.status) return false;
-      if (kw && r.keyword.toLowerCase().indexOf(kw) === -1) return false;
-      if (f.delta === "top3") {
-        if (r.rank == null || r.rank > 3) return false;
-      } else if (f.delta && changeKind(r) !== f.delta) return false;
-      return true;
+      if (m.sv == null && r.sv != null) m.sv = r.sv;
+      m.channels[r.engine + "|" + r.area] = r;
     });
-  }
-
-  function sortRecords(rows) {
-    var s = state.sort;
-    if (!s.key) return rows;
-    var dir = s.dir;
+    var rows = Object.keys(byKw).map(function (k) { return byKw[k]; });
     rows.sort(function (a, b) {
-      var va, vb;
-      if (s.key === "keyword") {
-        return dir * a.keyword.localeCompare(b.keyword, "ko");
-      }
-      if (s.key === "rank") {
-        va = a.rank == null ? Infinity : a.rank; /* null(권외 등)은 항상 하단 */
-        vb = b.rank == null ? Infinity : b.rank;
-        if (va === Infinity && vb === Infinity) return 0;
-        if (va === Infinity) return 1;
-        if (vb === Infinity) return -1;
-        return dir * (va - vb);
-      }
-      if (s.key === "delta") {
-        va = deltaSortValue(a); vb = deltaSortValue(b);
-        if (va === null && vb === null) return 0;
-        if (va === null) return 1;
-        if (vb === null) return -1;
-        return dir * (vb - va); /* 기본(asc 클릭)에서 상승 큰 순 */
-      }
-      if (s.key === "sv") {
-        va = a.sv == null ? null : a.sv; vb = b.sv == null ? null : b.sv;
-        if (va === null && vb === null) return 0;
-        if (va === null) return 1; /* 검색량 미확인은 항상 하단 */
-        if (vb === null) return -1;
-        return dir * (vb - va); /* 첫 클릭 = 검색량 큰 순 */
-      }
-      return 0;
+      var ca = CATEGORIES[a.category].order, cb = CATEGORIES[b.category].order;
+      if (ca !== cb) return ca - cb;
+      var sa = a.sv == null ? -1 : a.sv, sb = b.sv == null ? -1 : b.sv;
+      if (sa !== sb) return sb - sa;
+      return a.keyword.localeCompare(b.keyword, "ko");
     });
     return rows;
   }
 
-  function deltaSortValue(r) {
-    var d = deltaOf(r);
-    if (d === "new") return 1000;
-    if (d === "lost") return -1000;
-    return d; /* number or null */
+  function applyFilters(rows) {
+    var f = state.filters;
+    var kw = f.keyword.trim().toLowerCase();
+    return rows.filter(function (row) {
+      if (f.category && row.category !== f.category) return false;
+      if (kw && row.keyword.toLowerCase().indexOf(kw) === -1) return false;
+      return true;
+    });
   }
 
-  function deltaCell(r) {
-    var d = deltaOf(r);
-    if (d === "new") return '<span class="badge badge-new">신규</span>';
-    if (d === "lost") return '<span class="badge badge-lost">이탈</span>';
-    if (d === null) return '<span class="delta-flat">–</span>';
-    if (d > 0) return '<span class="delta-up">▲ ' + d + "</span>";
-    if (d < 0) return '<span class="delta-down">▼ ' + (-d) + "</span>";
-    return '<span class="delta-flat">–</span>';
+  /* 종합 = 측정된 채널만으로 가중 평균 순위(가중치 재정규화).
+     ok=순위, not_found=미노출→total+1 페널티(측정됨). 측정제외·수집이상은 제외. */
+  function composite(chMap, comp) {
+    var wsum = 0, acc = 0, parts = [];
+    comp.weights.forEach(function (w) {
+      var key = w[0], weight = w[1];
+      var rec = chMap[key];
+      if (!rec) return;                 // 측정 제외 / 미수집
+      if (rec.status !== "ok" && rec.status !== "not_found") return; // 수집이상 제외
+      var eff = rec.rank != null ? rec.rank : (rec.total > 0 ? rec.total + 1 : 11);
+      wsum += weight; acc += weight * eff;
+      parts.push(CHANNEL_BY_KEY[key].label + " " + (rec.rank != null ? rec.rank + "위" : "미노출"));
+    });
+    if (wsum === 0) return null;
+    return { value: acc / wsum, parts: parts };
   }
 
-  function rankCell(r) {
-    /* '1위 / 20' = 스캔한 20개 결과 중 1위 — 결과수 별도 컬럼의 의미 혼동을 흡수
-       (2026-08-07 사용자 피드백). 권외도 '/ 20'을 붙여 '20개 안에 없음'을 드러낸다. */
-    var suffix = r.total > 0 ? ' <span class="rank-total">/ ' + r.total + "</span>" : "";
-    if (r.rank != null) return '<span class="rank-val">' + r.rank + "위</span>" + suffix;
-    var label = RANK_NONE_LABEL[r.status] || "–";
-    return '<span class="rank-none s-' + esc(r.status) + '">' + label + "</span>" +
-      (r.status === "not_found" ? suffix : "");
+  function dot(cls) { return '<span class="dot ' + cls + '"></span>'; }
+
+  /* 장악 현황 셀 */
+  function statusCell(rec, ch) {
+    if (!rec) {
+      var t = ch.excluded ? "구글 광고는 측정 제외(유료 SerpAPI 필요)" : "측정 제외 / 미수집";
+      return '<td class="mx na" title="' + t + '">' + dot("na") + "</td>";
+    }
+    if (BAD_STATUS[rec.status] === 1) {
+      return '<td class="mx na" title="수집이상: ' + esc(STATUS_LABEL[rec.status] || rec.status) + '">' +
+        dot("na") + '<span class="mx-sub">수집이상</span></td>';
+    }
+    if (rec.rank != null) {
+      var suf = rec.total > 0 ? " /" + rec.total : "";
+      return '<td class="mx" title="' + rec.rank + "위" + (rec.total > 0 ? " (" + rec.total + "개 중)" : "") + '">' +
+        dot(rankClass(rec.rank)) + '<span class="mx-rank">' + rec.rank + '</span><span class="mx-tot">' + suf + "</span></td>";
+    }
+    // not_found → 미노출(빨강)
+    return '<td class="mx" title="미노출' + (rec.total > 0 ? " (" + rec.total + "개 스캔)" : "") + '">' +
+      dot("r") + '<span class="mx-none">미노출</span></td>';
   }
 
-  /* 네이버 키워드도구 최근 30일 검색수(PC+MO) ÷ 30 = 일평균 — daily 런에서 갱신.
-     띄어쓰기 변형('삼삼엠투 후기')은 API 정규화 특성상 무공백형과 같은 값이다. */
-  function svCell(r) {
-    if (r.sv == null) return '<span class="delta-flat">–</span>';
-    var daily = Math.round(r.sv / 30);
-    return '<span class="sv-val" title="네이버 최근 30일 총 ' + r.sv.toLocaleString() + '회">' +
-      daily.toLocaleString() + "</span>";
+  function trendAt(engine, area, keyword, backDays) {
+    var days = state.trends.days;
+    if (!days || !days.length) return null;
+    var series = state.trends.series[engine + "|" + area + "|" + keyword];
+    if (!series) return null;
+    var idx = days.length - 1 - backDays;
+    if (idx < 0 || idx >= series.length) return null;
+    var v = series[idx];
+    return v == null ? null : v;
   }
 
-  function renderTable() {
-    var rows = sortRecords(filteredRecords());
-    var total = rows.length;
-    var pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    if (state.page > pageCount) state.page = pageCount;
-    if (state.page < 1) state.page = 1;
-    var start = (state.page - 1) * PAGE_SIZE;
-    var pageRows = rows.slice(start, start + PAGE_SIZE);
+  /* 순위 Trend 셀 — 전일 대비(가시) + 전주·4주전(툴팁) */
+  function trendCell(rec, ch, keyword) {
+    if (!rec) {
+      var t = ch.excluded ? "구글 광고는 측정 제외" : "측정 제외 / 미수집";
+      return '<td class="mx na" title="' + t + '">' + dot("na") + "</td>";
+    }
+    if (BAD_STATUS[rec.status] === 1) {
+      return '<td class="mx na" title="수집이상">' + dot("na") + '<span class="mx-sub">수집이상</span></td>';
+    }
+    var cur = rec.rank, prev = rec.prev_rank;
+    var wk = trendAt(ch.engine, ch.area, keyword, 7);
+    var mo = trendAt(ch.engine, ch.area, keyword, 28);
+    var tip = "전일 " + (prev == null ? "–" : prev + "위") +
+      " · 전주 " + (wk == null ? "–" : wk + "위") +
+      " · 4주전 " + (mo == null ? "–" : mo + "위");
+    if (cur == null && prev == null) {
+      return '<td class="mx" title="미노출 · ' + tip + '">' + dot("r") + '<span class="mx-none">미노출</span></td>';
+    }
+    if (cur == null) {
+      return '<td class="mx" title="노출 이탈 · ' + tip + '">' + dot("r") + '<span class="badge badge-lost">이탈</span></td>';
+    }
+    var body;
+    if (prev == null) {
+      body = '<span class="mx-rank">' + cur + '</span> <span class="badge badge-new">신규</span>';
+    } else if (prev === cur) {
+      body = '<span class="mx-trend">' + prev + "→" + cur + "</span>";
+    } else {
+      var arrow = cur < prev ? '<span class="delta-up">▲' + (prev - cur) + "</span>"
+        : '<span class="delta-down">▼' + (cur - prev) + "</span>";
+      body = '<span class="mx-trend">' + prev + "→" + cur + "</span> " + arrow;
+    }
+    return '<td class="mx" title="' + tip + '">' + dot(rankClass(cur)) + body + "</td>";
+  }
 
-    var body = $("tableBody");
+  function compositeCell(chMap, comp) {
+    var c = composite(chMap, comp);
+    if (!c) return '<td class="mx cmp na" title="측정된 채널 없음">' + dot("na") + "</td>";
+    var r = Math.round(c.value);
+    var tip = "가중 평균 " + c.value.toFixed(1) + "위 · " + c.parts.join(" · ");
+    return '<td class="mx cmp" title="' + esc(tip) + '">' + dot(rankClass(r)) +
+      '<span class="cmp-val">' + c.value.toFixed(1) + "</span></td>";
+  }
+
+  function renderHead() {
+    var chHtml = CHANNELS.map(function (c) {
+      return '<th class="mx-h ch-' + c.grp + (c.excluded ? " excluded" : "") + '">' + esc(c.label) + "</th>";
+    }).join("");
+    var cmpHtml = COMPOSITES.map(function (c) {
+      return '<th class="mx-h cmp-h" title="' + esc(c.note) + '"><span class="cmp-h-t">' + esc(c.label) +
+        '</span><span class="cmp-h-n">' + esc(c.note) + "</span></th>";
+    }).join("");
+    $("matrixHead").innerHTML =
+      '<tr>' +
+      '<th class="mx-h col-cat">구분</th>' +
+      '<th class="mx-h col-kw">키워드</th>' +
+      '<th class="mx-h col-imp" title="구분별 목표 티어(★★★ 방어 / ★★ 확대 / ★ 진입)">중요도</th>' +
+      '<th class="mx-h col-sv num" title="네이버 키워드도구 최근 30일 검색수 ÷ 30 = 일평균">네이버 검색량/일</th>' +
+      chHtml + cmpHtml + "</tr>";
+  }
+
+  function stars(cat) {
+    var n = CATEGORIES[cat].stars;
+    var s = "";
+    for (var i = 0; i < 3; i++) s += i < n ? "★" : "";
+    return s;
+  }
+
+  function renderMatrix() {
+    renderHead();
+    var rows = applyFilters(buildRows());
+    var body = $("matrixBody");
+    var trend = state.view === "trend";
     var html = "";
-    for (var i = 0; i < pageRows.length; i++) {
-      var r = pageRows[i];
-      var groupBrand = isBrand(r.group);
-      html += '<tr data-idx="' + r._idx + '">' +
-        '<td class="kw">' + esc(r.keyword) + "</td>" +
-        "<td><span class=\"badge " + (groupBrand ? "badge-group-brand\">브랜드" : "badge-group-generic\">일반") + "</span></td>" +
-        '<td class="num">' + svCell(r) + "</td>" +
-        "<td>" + (ENGINE_LABEL[r.engine] || esc(r.engine)) + "</td>" +
-        "<td>" + (AREA_LABEL[r.area] || esc(r.area)) + "</td>" +
-        '<td class="num">' + rankCell(r) + "</td>" +
-        "<td>" + deltaCell(r) + "</td>" +
-        "<td>" + esc(r.section || "–") + "</td>" +
-        '<td><span class="badge badge-s-' + esc(r.status) + '">' + (STATUS_LABEL[r.status] || esc(r.status)) + "</span></td>" +
-        "<td>" + sparklineSVG(r.engine, r.area, r.keyword) + "</td>" +
-        '<td class="go">' + goBtn(r.engine, r.keyword) + "</td>" +
-        '<td class="time">' + esc(r.collected_at || "") + "</td>" +
-        "</tr>";
+    var lastCat = null;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var cat = CATEGORIES[row.category];
+      if (row.category !== lastCat) {
+        html += '<tr class="cat-sep ' + cat.cls + '"><td colspan="' + (4 + CHANNELS.length + COMPOSITES.length) +
+          '"><span class="cat-sep-label">' + esc(cat.label) + "</span>" +
+          '<span class="cat-sep-goal">' + esc(cat.goal) + "</span></td></tr>";
+        lastCat = row.category;
+      }
+      var svd = dailySv(row.sv);
+      var cells = "";
+      CHANNELS.forEach(function (ch) {
+        var rec = row.channels[ch.key];
+        cells += trend ? trendCell(rec, ch, row.keyword) : statusCell(rec, ch);
+      });
+      COMPOSITES.forEach(function (comp) { cells += compositeCell(row.channels, comp); });
+
+      html += '<tr data-kw="' + esc(row.keyword) + '" title="순위 추이 보기">' +
+        '<td class="col-cat"><span class="cat-badge ' + cat.cls + '">' + esc(cat.label) + "</span></td>" +
+        '<td class="col-kw">' + esc(row.keyword) + "</td>" +
+        '<td class="col-imp" title="' + esc(cat.goal) + '">' + stars(row.category) + "</td>" +
+        '<td class="col-sv num" title="' + (row.sv == null ? "검색량 미확인" : "최근 30일 총 " + fmt(row.sv) + "회") + '">' +
+        (svd == null ? "–" : fmt(svd)) + "</td>" +
+        cells + "</tr>";
     }
     body.innerHTML = html;
-    $("emptyMsg").hidden = total > 0;
+    $("emptyMsg").hidden = rows.length > 0;
 
-    var label = total === 0 ? "0건"
-      : (start + 1).toLocaleString() + "–" + (start + pageRows.length).toLocaleString() +
-        " / " + total.toLocaleString() + "건";
-    if (total !== state.records.length) label += " (전체 " + state.records.length.toLocaleString() + "건)";
+    var total = buildRows().length;
+    var label = rows.length === total
+      ? total.toLocaleString() + "개 키워드"
+      : rows.length.toLocaleString() + " / " + total.toLocaleString() + "개 키워드";
     $("rowCount").textContent = label;
-
-    renderPager(pageCount);
   }
 
-  /* ---------- pagination ---------- */
-  /* « 이전 · 1 … 현재±2 … 끝 · 다음 » — 필터·정렬 변경 시 1페이지로 리셋 */
-  function renderPager(pageCount) {
-    var pager = $("pager");
-    if (pageCount <= 1) { pager.hidden = true; pager.innerHTML = ""; return; }
-    var cur = state.page;
-    var pages = [];
-    for (var p = 1; p <= pageCount; p++) {
-      if (p === 1 || p === pageCount || Math.abs(p - cur) <= 2) pages.push(p);
+  /* ---------- modal (순위 추이 + 링크) ---------- */
+  function openModalByKeyword(keyword) {
+    var rec = null;
+    for (var i = 0; i < state.records.length; i++) {
+      if (state.records[i].keyword === keyword) { rec = state.records[i]; break; }
     }
-    var html = '<button type="button" class="page-btn page-prev" data-page="' + (cur - 1) + '"' +
-      (cur === 1 ? " disabled" : "") + ">« 이전</button>";
-    var last = 0;
-    pages.forEach(function (p) {
-      if (p - last > 1) html += '<span class="page-gap">…</span>';
-      html += '<button type="button" class="page-btn' + (p === cur ? " is-current" : "") +
-        '" data-page="' + p + '"' + (p === cur ? ' aria-current="page"' : "") + ">" + p + "</button>";
-      last = p;
-    });
-    html += '<button type="button" class="page-btn page-next" data-page="' + (cur + 1) + '"' +
-      (cur === pageCount ? " disabled" : "") + ">다음 »</button>";
-    pager.innerHTML = html;
-    pager.hidden = false;
+    if (rec) openModal(rec);
   }
 
-  /* 필터·정렬이 바뀌면 항상 1페이지부터 */
-  function resetAndRender() {
-    state.page = 1;
-    renderTable();
-  }
-
-  /* ---------- modal ---------- */
   function openModal(record) {
     var keyword = record.keyword;
     $("modalTitle").textContent = "\u201C" + keyword + "\u201D 순위 추이";
@@ -483,13 +519,12 @@
       var p = key.split("|");
       if (p.slice(2).join("|") !== keyword) return;
       var series = state.trends.series[key];
-      /* 값이 전부 null 인 시리즈(구글 광고 blocked 이력 등)는 범례 노이즈 → 제외 */
       if (!series.some(function (v) { return v != null; })) return;
       var color = CHART_COLORS[ci % CHART_COLORS.length];
       ci++;
       datasets.push({
         label: (ENGINE_LABEL[p[0]] || p[0]) + " · " + (AREA_LABEL[p[1]] || p[1]),
-        data: state.trends.series[key],
+        data: series,
         borderColor: color,
         backgroundColor: color,
         spanGaps: false,
@@ -592,8 +627,6 @@
     document.body.style.overflow = "";
   }
 
-  /* TOP3 = 해당 엔진·영역에서 자사가 검색 결과 1~3위 안에 노출된 키워드 수.
-     팝업으로 정의와 실제 키워드 목록(현재 순위 포함)을 보여준다. */
   function openTop3Modal(engine, area) {
     var rows = state.records.filter(function (r) {
       return r.engine === engine && r.area === area && r.rank != null && r.rank <= 3;
@@ -603,7 +636,6 @@
     $("kwModalTitle").textContent =
       (ENGINE_LABEL[engine] || engine) + " " + (AREA_LABEL[area] || area) +
       " · TOP3 " + rows.length + "개";
-    /* 칩 색 = 키워드 그룹(순위와 무관) — 범례 없이는 오독됨(2026-08-07 사용자 질문) */
     $("kwModalDesc").innerHTML =
       "이 엔진·영역에서 자사(삼삼엠투)가 검색 결과 1~3위 안에 노출된 키워드입니다. " +
       "상위 노출일수록 클릭 유입이 커서, 이 개수가 줄면 노출 경쟁에서 밀리고 있다는 신호입니다. " +
@@ -621,102 +653,54 @@
 
   /* ---------- events ---------- */
   function bindEvents() {
-    [["fEngine", "engine"], ["fArea", "area"], ["fGroup", "group"], ["fStatus", "status"]]
-      .forEach(function (pair) {
-        $(pair[0]).addEventListener("change", function (e) {
-          state.filters[pair[1]] = e.target.value;
-          resetAndRender();
-        });
-      });
-
     var searchTimer = null;
     $("fKeyword").addEventListener("input", function (e) {
       clearTimeout(searchTimer);
       var v = e.target.value;
       searchTimer = setTimeout(function () {
         state.filters.keyword = v;
-        resetAndRender();
+        renderMatrix();
       }, 150);
     });
 
-    document.querySelectorAll("th.sortable").forEach(function (th) {
-      th.addEventListener("click", function () {
-        var key = th.dataset.sort;
-        if (state.sort.key === key) {
-          state.sort.dir = -state.sort.dir;
-        } else {
-          state.sort.key = key;
-          state.sort.dir = 1;
-        }
-        document.querySelectorAll("th.sortable").forEach(function (h) {
-          h.classList.remove("sorted-asc", "sorted-desc");
-        });
-        th.classList.add(state.sort.dir === 1 ? "sorted-asc" : "sorted-desc");
-        resetAndRender();
-      });
+    $("fCategory").addEventListener("change", function (e) {
+      state.filters.category = e.target.value;
+      renderMatrix();
     });
 
-    /* 변동 퀵필터 칩 — 다른 필터와 AND 조합 */
-    function setDeltaFilter(v) {
-      state.filters.delta = v;
-      document.querySelectorAll("#deltaChips .chip").forEach(function (c) {
-        c.classList.toggle("is-active", c.dataset.delta === v);
+    $("viewSeg").addEventListener("click", function (e) {
+      var btn = e.target.closest(".seg-btn");
+      if (!btn) return;
+      state.view = btn.dataset.view;
+      document.querySelectorAll("#viewSeg .seg-btn").forEach(function (b) {
+        b.classList.toggle("is-active", b.dataset.view === state.view);
       });
-      resetAndRender();
-    }
-    $("deltaChips").addEventListener("click", function (e) {
-      var chip = e.target.closest(".chip");
-      if (chip) setDeltaFilter(chip.dataset.delta);
+      renderMatrix();
     });
 
-    /* 브리핑 패널: 행 클릭 → 추이 모달 / '전체 보기' → 해당 변동 퀵필터 + 테이블로 */
+    /* 브리핑 패널: 행 클릭 → 추이 모달 */
     $("briefing").addEventListener("click", function (e) {
-      var more = e.target.closest(".brief-more");
-      if (more) {
-        setDeltaFilter(more.dataset.delta);
-        $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
       var row = e.target.closest(".brief-row");
       if (!row) return;
       var r = state.records[Number(row.dataset.idx)];
       if (r) openModal(r);
     });
 
-    /* 페이저 — 페이지 이동 시 테이블 상단으로 스크롤 */
-    $("pager").addEventListener("click", function (e) {
-      var btn = e.target.closest(".page-btn");
-      if (!btn || btn.disabled) return;
-      var p = Number(btn.dataset.page);
-      if (!p || p === state.page) return;
-      state.page = p;
-      renderTable();
-      $("rankTable").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    $("tableBody").addEventListener("click", function (e) {
-      var tr = e.target.closest("tr[data-idx]");
-      if (e.target.closest("a")) return; /* 보러가기 링크 클릭은 모달을 띄우지 않는다 */
+    /* 매트릭스 행/셀 클릭 → 해당 키워드 순위 추이 모달 */
+    $("matrixBody").addEventListener("click", function (e) {
+      if (e.target.closest("a")) return;
+      var tr = e.target.closest("tr[data-kw]");
       if (!tr) return;
-      var r = state.records[Number(tr.dataset.idx)];
-      if (r) openModal(r);
+      openModalByKeyword(tr.dataset.kw);
     });
 
-    /* 카드 클릭: 그룹 라벨 → 키워드 팝업 / 핵심 키워드 행 → 추이 모달 /
-       그 외 → 아래 테이블을 해당 엔진·영역으로 필터 */
+    /* 카드: 그룹 라벨 → 키워드 팝업 / TOP3 → TOP3 팝업 / 핵심 키워드 행 → 추이 모달 */
     $("summaryCards").addEventListener("click", function (e) {
       var link = e.target.closest(".kw-group-link");
       if (link) {
         var linkCard = e.target.closest(".card[data-engine]");
         if (link.classList.contains("top3-link") && linkCard) {
           openTop3Modal(linkCard.dataset.engine, linkCard.dataset.area);
-        } else if (link.classList.contains("bad-link") && linkCard) {
-          /* 수집이상 → 테이블을 해당 엔진·영역의 이상 레코드(차단·구조변경·오류)로 필터 */
-          $("fEngine").value = state.filters.engine = linkCard.dataset.engine;
-          $("fArea").value = state.filters.area = linkCard.dataset.area;
-          $("fStatus").value = state.filters.status = "bad";
-          resetAndRender();
-          $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           openKwModal(link.dataset.group);
         }
@@ -725,32 +709,22 @@
       var card = e.target.closest(".card[data-engine]");
       if (!card) return;
       var kwRow = e.target.closest(".card-kw-row");
-      if (kwRow) {
+      if (kwRow && kwRow.dataset.kw) {
         for (var i = 0; i < state.records.length; i++) {
           var r = state.records[i];
           if (r.engine === card.dataset.engine && r.area === card.dataset.area &&
               r.keyword === kwRow.dataset.kw) { openModal(r); return; }
         }
-        return;
       }
-      if (card.classList.contains("card-blocked")) return;
-      $("fEngine").value = state.filters.engine = card.dataset.engine;
-      $("fArea").value = state.filters.area = card.dataset.area;
-      resetAndRender();
-      $("filterBar").scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
     /* 팝업 내 키워드 칩 → 해당 키워드 순위 추이 모달 */
     $("kwModal").addEventListener("click", function (e) {
       if (e.target.hasAttribute("data-close")) { closeKwModal(); return; }
       var chip = e.target.closest(".kw-chip");
-      if (!chip || !chip.dataset.kw) return; /* 범례 칩(data-kw 없음)은 무시 */
-      var rec = null;
-      for (var i = 0; i < state.records.length; i++) {
-        if (state.records[i].keyword === chip.dataset.kw) { rec = state.records[i]; break; }
-      }
+      if (!chip || !chip.dataset.kw) return;
       closeKwModal();
-      if (rec) openModal(rec);
+      openModalByKeyword(chip.dataset.kw);
     });
 
     $("modal").addEventListener("click", function (e) {
@@ -782,7 +756,7 @@
       $("generatedAt").textContent = "마지막 수집: " + (latest.generated_at || "–");
       renderCards();
       renderBriefing();
-      renderTable();
+      renderMatrix();
     }).catch(function (err) {
       $("summaryCards").innerHTML = '<div class="card card-blocked"><div class="card-blocked-msg">데이터를 불러오지 못했습니다: ' + esc(err.message) + "</div></div>";
     });

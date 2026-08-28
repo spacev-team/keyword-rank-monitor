@@ -79,14 +79,23 @@ GENERIC_KEYWORDS: list[str] = [
     "광주남구단기원룸", "진주단기원룸", "구리단기임대", "창원단기임대",
 ]
 
+# ── 경쟁사/대안 키워드(구분=Competitor) ─────────────────────────────
+#   대안 탐색 고객을 잡기 위한 경쟁 브랜드·대체재 키워드. TOP10 진입이 목표.
+#   대시보드 '키워드 × 채널 장악 Matrix'의 Competitor 그룹으로 분류된다.
+#   비우면 Competitor 행은 표시되지 않는다(수집 대상에서도 제외).
+COMPETITOR_KEYWORDS: list[str] = [
+    "에어비앤비", "리브애니웨어",
+]
+
 
 def all_keywords() -> list[tuple[str, str]]:
-    """(keyword, kw_group) 목록 — 순서 유지·중복 제거. group ∈ brand|brand_ext|generic."""
+    """(keyword, kw_group) 목록 — 순서 유지·중복 제거. group ∈ brand|brand_ext|generic|competitor."""
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for kw_list, group in ((BRAND_KEYWORDS, "brand"),
                            (BRAND_EXPANDED, "brand_ext"),
-                           (GENERIC_KEYWORDS, "generic")):
+                           (GENERIC_KEYWORDS, "generic"),
+                           (COMPETITOR_KEYWORDS, "competitor")):
         for kw in kw_list:
             if kw not in seen:
                 seen.add(kw)
