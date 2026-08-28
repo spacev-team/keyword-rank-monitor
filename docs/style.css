@@ -550,3 +550,26 @@ table.matrix thead th.cmp-h:first-of-type, td.mx.cmp:first-of-type { }
   .matrix-controls input[type="search"] { width: 120px; }
   .cat-sep-goal { display: none; }
 }
+
+/* 매트릭스 전체 폭 확장 — 14열을 가로 스크롤 없이 한 화면에 (96vw: 스크롤바 여유) */
+.matrix-section {
+  width: 96vw;
+  margin-left: calc(50% - 48vw);
+  margin-right: calc(50% - 48vw);
+  padding: 0 clamp(12px, 2vw, 28px);
+}
+.matrix-section .matrix-wrap { max-height: 78vh; overflow-x: hidden; }
+table.matrix { table-layout: fixed; }
+table.matrix thead th.mx-h { padding: 7px 4px; font-size: 0.74rem; }
+table.matrix tbody td { padding: 5px 4px; }
+th.col-cat, td.col-cat { width: 70px; }
+th.col-kw, td.col-kw { width: 138px; white-space: normal; word-break: break-all; }
+th.col-imp, td.col-imp { width: 44px; }
+th.col-sv, td.col-sv { width: 68px; }
+.cmp-h-n { font-size: 0.6rem; }
+td.mx .mx-tot { font-size: 0.66em; }
+@media (max-width: 1000px) {
+  .matrix-section { width: auto; margin-left: 0; margin-right: 0; padding: 0; }
+  .matrix-section .matrix-wrap { overflow-x: auto; }
+  table.matrix { table-layout: auto; }
+}

@@ -34,10 +34,10 @@
     { key: "naver|ad", engine: "naver", area: "ad", label: "네이버 광고", grp: "ad" },
     { key: "naver|organic", engine: "naver", area: "organic", label: "네이버 오가닉", grp: "organic" },
     { key: "google|organic", engine: "google", area: "organic", label: "구글 SEO", grp: "organic" },
-    { key: "appstore|app", engine: "appstore", area: "app", label: "App Store", grp: "app" },
-    { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play", grp: "app" },
     { key: "daum|ad", engine: "daum", area: "ad", label: "다음 광고", grp: "ad" },
-    { key: "daum|organic", engine: "daum", area: "organic", label: "다음 오가닉", grp: "organic" }
+    { key: "daum|organic", engine: "daum", area: "organic", label: "다음 오가닉", grp: "organic" },
+    { key: "appstore|app", engine: "appstore", area: "app", label: "App Store", grp: "app" },
+    { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play", grp: "app" }
   ];
   var CHANNEL_BY_KEY = {};
   CHANNELS.forEach(function (c) { CHANNEL_BY_KEY[c.key] = c; });
@@ -65,6 +65,7 @@
     records: [],
     trends: { days: [], series: {} },
     filters: { keyword: "", category: "" },
+    sort: "cat",
     view: "status",
     chart: null,
     generatedAt: ""
@@ -320,9 +321,21 @@
     });
     var rows = Object.keys(byKw).map(function (k) { return byKw[k]; });
     rows.sort(function (a, b) {
+      var sa = a.sv == null ? -1 : a.sv, sb = b.sv == null ? -1 : b.sv;
+      if (state.sort === "sv_asc") {
+        // 검색량 낮은순(검색량 미확인은 항상 하단)
+        if (sa === sb) return a.keyword.localeCompare(b.keyword, "ko");
+        if (sa < 0) return 1;
+        if (sb < 0) return -1;
+        return sa - sb;
+      }
+      if (state.sort === "sv_desc") {
+        if (sa !== sb) return sb - sa;
+        return a.keyword.localeCompare(b.keyword, "ko");
+      }
+      // 기본: 구분별 → 검색량 desc → 키워드
       var ca = CATEGORIES[a.category].order, cb = CATEGORIES[b.category].order;
       if (ca !== cb) return ca - cb;
-      var sa = a.sv == null ? -1 : a.sv, sb = b.sv == null ? -1 : b.sv;
       if (sa !== sb) return sb - sa;
       return a.keyword.localeCompare(b.keyword, "ko");
     });
@@ -461,12 +474,13 @@
     var rows = applyFilters(buildRows());
     var body = $("matrixBody");
     var trend = state.view === "trend";
+    var grouped = state.sort === "cat";
     var html = "";
     var lastCat = null;
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       var cat = CATEGORIES[row.category];
-      if (row.category !== lastCat) {
+      if (grouped && row.category !== lastCat) {
         html += '<tr class="cat-sep ' + cat.cls + '"><td colspan="' + (4 + CHANNELS.length + COMPOSITES.length) +
           '"><span class="cat-sep-label">' + esc(cat.label) + "</span>" +
           '<span class="cat-sep-goal">' + esc(cat.goal) + "</span></td></tr>";
@@ -664,6 +678,11 @@
 
     $("fCategory").addEventListener("change", function (e) {
       state.filters.category = e.target.value;
+      renderMatrix();
+    });
+
+    $("sortSel").addEventListener("change", function (e) {
+      state.sort = e.target.value;
       renderMatrix();
     });
 

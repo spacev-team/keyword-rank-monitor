@@ -25,7 +25,7 @@
     <div id="briefing" class="briefing" hidden></div>
   </section>
 
-  <section aria-label="키워드 × 채널 장악 매트릭스">
+  <section class="matrix-section" aria-label="키워드 × 채널 장악 매트릭스">
     <div class="matrix-head">
       <div class="matrix-titles">
         <h2 class="matrix-title">키워드 × 채널 장악 Matrix</h2>
@@ -41,6 +41,11 @@
           <option value="brand">Brand</option>
           <option value="category">Category</option>
           <option value="competitor">Competitor</option>
+        </select>
+        <select id="sortSel" title="정렬">
+          <option value="cat">구분별 · 검색량순</option>
+          <option value="sv_desc">검색량 높은순</option>
+          <option value="sv_asc">검색량 낮은순</option>
         </select>
         <input type="search" id="fKeyword" placeholder="키워드 검색" autocomplete="off">
         <span id="rowCount" class="row-count"></span>
