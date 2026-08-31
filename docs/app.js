@@ -36,8 +36,8 @@
     { key: "google|organic", engine: "google", area: "organic", label: "구글 SEO", grp: "organic" },
     { key: "daum|ad", engine: "daum", area: "ad", label: "다음 광고", grp: "ad" },
     { key: "daum|organic", engine: "daum", area: "organic", label: "다음 오가닉", grp: "organic" },
-    { key: "appstore|app", engine: "appstore", area: "app", label: "App Store", grp: "app" },
-    { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play", grp: "app" }
+    { key: "appstore|app", engine: "appstore", area: "app", label: "App Store 오가닉", grp: "app" },
+    { key: "playstore|app", engine: "playstore", area: "app", label: "Google Play 오가닉", grp: "app" }
   ];
   var CHANNEL_BY_KEY = {};
   CHANNELS.forEach(function (c) { CHANNEL_BY_KEY[c.key] = c; });
