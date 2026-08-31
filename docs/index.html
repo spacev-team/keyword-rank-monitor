@@ -32,12 +32,14 @@
         <span class="matrix-sub">검색량이 높은 키워드를 위쪽에 배치 · 열 제목 클릭 시 정렬(오름/내림) · 행/셀 클릭 시 순위 추이</span>
       </div>
       <div class="matrix-controls">
-        <div class="seg" id="viewSeg" role="group" aria-label="보기 전환" title="장악 현황(현재 순위) ↔ 순위 Trend(전일 대비 변동)">
+        <div class="seg" id="viewSeg" role="group" aria-label="보기 전환" title="장악 현황(현재 순위) · 순위 Trend(전일 대비) · 주간 평균(최근 7일 평균)">
           <button type="button" class="seg-btn is-active" data-view="status">장악 현황</button>
           <button type="button" class="seg-btn" data-view="trend">순위 Trend</button>
+          <button type="button" class="seg-btn" data-view="weekly">주간 평균</button>
         </div>
         <select id="fCategory" title="구분">
           <option value="">구분 전체</option>
+          <option value="campaign">브랜드캠페인'26</option>
           <option value="brand">Brand</option>
           <option value="category">Category</option>
           <option value="competitor">Competitor</option>

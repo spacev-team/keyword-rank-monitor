@@ -525,6 +525,7 @@ td.col-imp { color: var(--dot-y); letter-spacing: -1px; }
 .cat-brand .cat-badge, .cat-badge.cat-brand { background: var(--accent-soft); color: var(--accent-dark); }
 .cat-category .cat-badge, .cat-badge.cat-category { background: #E1F3EC; color: #0F7A5A; }
 .cat-competitor .cat-badge, .cat-badge.cat-competitor { background: #FCEBDA; color: #B06A12; }
+.cat-campaign .cat-badge, .cat-badge.cat-campaign { background: #FCE1EE; color: #C2185B; }
 
 tr.cat-sep td {
   position: sticky; top: 37px; z-index: 2; background: #FAF9FE; text-align: left !important;
@@ -533,6 +534,7 @@ tr.cat-sep td {
 }
 tr.cat-sep.cat-category td { border-left-color: #0F7A5A; }
 tr.cat-sep.cat-competitor td { border-left-color: #B06A12; }
+tr.cat-sep.cat-campaign td { border-left-color: #C2185B; }
 .cat-sep-label { font-weight: 800; font-size: 0.85rem; }
 .cat-sep-goal { color: var(--text-sub); font-size: 0.76rem; margin-left: 10px; }
 

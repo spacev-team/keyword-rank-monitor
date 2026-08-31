@@ -56,9 +56,10 @@
      Brand=검색 방어(1위 필수) · Category=신규 확보(TOP3) · Competitor=대안 탐색(TOP10).
      중요도 별점은 이 목표 티어를 반영(★★★/★★/★) — 조정하려면 stars 만 바꾸면 된다. */
   var CATEGORIES = {
-    brand: { order: 0, label: "Brand", cls: "cat-brand", stars: 3, goal: "검색 결과 방어 · 1위 필수" },
-    category: { order: 1, label: "Category", cls: "cat-category", stars: 2, goal: "신규 고객 확보 · TOP3 확대" },
-    competitor: { order: 2, label: "Competitor / Alternative", cls: "cat-competitor", stars: 1, goal: "대안 탐색 고객 확보 · TOP10 진입" }
+    campaign: { order: 0, label: "브랜드캠페인'26", cls: "cat-campaign", stars: 3, goal: "2026 브랜드캠페인 타깃 · 최우선" },
+    brand: { order: 1, label: "Brand", cls: "cat-brand", stars: 3, goal: "검색 결과 방어 · 1위 필수" },
+    category: { order: 2, label: "Category", cls: "cat-category", stars: 2, goal: "신규 고객 확보 · TOP3 확대" },
+    competitor: { order: 3, label: "Competitor / Alternative", cls: "cat-competitor", stars: 1, goal: "대안 탐색 고객 확보 · TOP10 진입" }
   };
 
   var state = {
@@ -81,10 +82,11 @@
 
   function isBrand(group) { return BRAND_GROUPS[group] === 1; }
 
-  /* group → 매트릭스 구분(brand|category|competitor) */
+  /* group → 매트릭스 구분(campaign|brand|competitor|category) */
   function categoryOf(group) {
-    if (isBrand(group)) return "brand";
+    if (group === "campaign") return "campaign";
     if (group === "competitor") return "competitor";
+    if (isBrand(group)) return "brand";
     return "category";
   }
 
@@ -328,14 +330,19 @@
   function sortNum(row, key) {
     if (key === "sv") return row.sv == null ? null : row.sv;
     if (key === "imp") return CATEGORIES[row.category].stars;
+    var weekly = state.view === "weekly";
     if (key.indexOf("cmp_") === 0) {
       var comp = null;
       for (var i = 0; i < COMPOSITES.length; i++) if (COMPOSITES[i].id === key.slice(4)) comp = COMPOSITES[i];
       if (!comp) return null;
-      var c = composite(row.channels, comp);
+      var c = weekly ? compositeWeekly(row, comp) : composite(row.channels, comp);
       return c ? c.value : null;
     }
     // 채널 key(engine|area) → 순위(측정제외·미노출·수집이상 = null)
+    if (weekly) {
+      var wch = CHANNEL_BY_KEY[key];
+      return wch ? weeklyAvg(wch.engine, wch.area, row.keyword) : null;
+    }
     var rec = row.channels[key];
     if (!rec || rec.rank == null) return null;
     return rec.rank;
@@ -464,6 +471,56 @@
       '<span class="cmp-val">' + c.value.toFixed(1) + "</span></td>";
   }
 
+  /* 최근 7일 평균 순위 — trends.json 시계열에서 유효 숫자(측정된 순위)만 평균.
+     이력이 7일 미만이어도 있는 만큼만, null(미노출·수집이상·미측정)은 제외. */
+  function weeklyAvg(engine, area, keyword) {
+    var days = state.trends.days;
+    if (!days || !days.length) return null;
+    var series = state.trends.series[engine + "|" + area + "|" + keyword];
+    if (!series) return null;
+    var start = Math.max(0, series.length - 7);
+    var sum = 0, n = 0;
+    for (var i = start; i < series.length; i++) {
+      if (series[i] != null) { sum += series[i]; n++; }
+    }
+    return n ? sum / n : null;
+  }
+
+  /* 주간 평균 셀 */
+  function weeklyCell(ch, keyword) {
+    var avg = weeklyAvg(ch.engine, ch.area, keyword);
+    if (avg == null) {
+      var t = ch.excluded ? "구글 광고는 측정 제외" : "최근 7일 순위 데이터 없음";
+      return '<td class="mx na" title="' + t + '">' + dot("na") + "</td>";
+    }
+    var r = Math.round(avg);
+    return '<td class="mx" title="최근 7일 평균 ' + avg.toFixed(1) + '위">' +
+      dot(rankClass(r)) + '<span class="mx-rank">' + avg.toFixed(1) + "</span></td>";
+  }
+
+  /* 주간 평균 기준 종합 — 측정된 채널의 주간평균만으로 가중치 재정규화 */
+  function compositeWeekly(row, comp) {
+    var wsum = 0, acc = 0, parts = [];
+    comp.weights.forEach(function (w) {
+      var key = w[0], weight = w[1], ch = CHANNEL_BY_KEY[key];
+      var avg = weeklyAvg(ch.engine, ch.area, row.keyword);
+      if (avg == null) return;
+      wsum += weight; acc += weight * avg;
+      parts.push(ch.label + " " + avg.toFixed(1) + "위");
+    });
+    if (wsum === 0) return null;
+    return { value: acc / wsum, parts: parts };
+  }
+
+  function compositeWeeklyCell(row, comp) {
+    var c = compositeWeekly(row, comp);
+    if (!c) return '<td class="mx cmp na" title="주간 데이터 없음">' + dot("na") + "</td>";
+    var r = Math.round(c.value);
+    var tip = "최근 7일 가중 평균 " + c.value.toFixed(1) + "위 · " + c.parts.join(" · ");
+    return '<td class="mx cmp" title="' + esc(tip) + '">' + dot(rankClass(r)) +
+      '<span class="cmp-val">' + c.value.toFixed(1) + "</span></td>";
+  }
+
   function sortArrow(key) {
     if (state.sort.key !== key) return ' <span class="sort-ind dim">↕</span>';
     return state.sort.dir === 1 ? ' <span class="sort-ind">▲</span>' : ' <span class="sort-ind">▼</span>';
@@ -511,6 +568,7 @@
     var rows = applyFilters(buildRows());
     var body = $("matrixBody");
     var trend = state.view === "trend";
+    var weekly = state.view === "weekly";
     var grouped = state.sort.key === "category";
     var html = "";
     var lastCat = null;
@@ -527,9 +585,12 @@
       var cells = "";
       CHANNELS.forEach(function (ch) {
         var rec = row.channels[ch.key];
-        cells += trend ? trendCell(rec, ch, row.keyword) : statusCell(rec, ch);
+        cells += weekly ? weeklyCell(ch, row.keyword)
+          : trend ? trendCell(rec, ch, row.keyword) : statusCell(rec, ch);
       });
-      COMPOSITES.forEach(function (comp) { cells += compositeCell(row.channels, comp); });
+      COMPOSITES.forEach(function (comp) {
+        cells += weekly ? compositeWeeklyCell(row, comp) : compositeCell(row.channels, comp);
+      });
 
       html += '<tr data-kw="' + esc(row.keyword) + '" title="순위 추이 보기">' +
         '<td class="col-cat"><span class="cat-badge ' + cat.cls + '">' + esc(cat.label) + "</span></td>" +

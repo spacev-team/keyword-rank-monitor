@@ -94,23 +94,37 @@ COMPETITOR_KEYWORDS: list[str] = [
     "엔코스테이", "자리톡", "단단홈즈", "플라트라이프",
 ]
 
+# ── 2026 브랜드캠페인 타깃 키워드(구분=브랜드캠페인'26) ──────────────
+#   캠페인 성과를 한 눈에 보려는 전용 카테고리. 다른 그룹(Brand·Category)보다 우선
+#   분류된다 — 삼삼엠투·33M2(Brand)·단기임대(Category)는 여기로 이동한다(배타적, 사용자 확정).
+CAMPAIGN_KEYWORDS: list[str] = [
+    "단기임대", "삼삼엠투", "잠깐 살 집", "모두를 위한 단기임대", "33M2",
+]
+
 
 def all_keywords() -> list[tuple[str, str]]:
-    """(keyword, kw_group) 목록 — 순서 유지·중복 제거. group ∈ brand|brand_ext|generic|competitor.
-    경쟁사 목록에 있는 키워드는 다른 그룹(예: generic '고시원'·'달방')에 있어도 competitor 로만
-    분류한다 — 대시보드 구분이 사용자 의도(Competitor)와 어긋나지 않도록 선점을 막는다."""
+    """(keyword, kw_group) 목록 — 순서 유지·중복 제거.
+    group ∈ brand|brand_ext|generic|competitor|campaign.
+    우선순위: campaign > competitor > (brand·brand_ext·generic). 상위 그룹에 있는 키워드는
+    하위 그룹에서 건너뛴다 — 대시보드 구분이 사용자 의도와 어긋나지 않도록 선점을 막는다
+    (예: 삼삼엠투·33M2·단기임대 → campaign, 고시원·달방은 competitor 아님 → generic)."""
+    campaign_set = set(CAMPAIGN_KEYWORDS)
     comp_set = set(COMPETITOR_KEYWORDS)
+    priority = campaign_set | comp_set
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for kw_list, group in ((BRAND_KEYWORDS, "brand"),
                            (BRAND_EXPANDED, "brand_ext"),
                            (GENERIC_KEYWORDS, "generic"),
-                           (COMPETITOR_KEYWORDS, "competitor")):
+                           (COMPETITOR_KEYWORDS, "competitor"),
+                           (CAMPAIGN_KEYWORDS, "campaign")):
         for kw in kw_list:
             if kw in seen:
                 continue
-            if group != "competitor" and kw in comp_set:
-                continue  # competitor 로 분류하기 위해 앞선 그룹에서 건너뜀
+            if group not in ("campaign", "competitor") and kw in priority:
+                continue  # 더 높은 우선순위 그룹으로 분류하기 위해 건너뜀
+            if group == "competitor" and kw in campaign_set:
+                continue  # campaign 이 competitor 보다 우선
             seen.add(kw)
             out.append((kw, group))
     return out
