@@ -212,7 +212,12 @@ class NaverRankCollector(BaseCollector):
             # 페이지는 왔는데 결과 블록 0개 — 구조 변경 신호
             return RankRecord("naver", "organic", kw, None, 0, status="parse_fail",
                               detail="결과 블록 0개 추출")
-        scan = blocks[:config.ORGANIC_SCAN_LIMIT]
+        # 오가닉 순위 = '웹사이트'(일반 웹문서) 결과 내 순번만. 블로그·카페·뉴스·지식iN·
+        # 이미지·동영상·플레이스 등 버티컬 컬렉션은 제외한다(2026-08-30 사용자 리포트:
+        # 단기임대 웹결과 3위인데 앞선 버티컬 블록까지 세어 8위로 기록됨 — 실제 화면·
+        # 랭크트래커 관례와 불일치). '웹사이트' = fds-web-root 일반 웹문서 블록.
+        web = [(s, b) for (s, b) in blocks if s == "웹사이트"]
+        scan = web[:config.ORGANIC_SCAN_LIMIT]
         for pos, (section, blk) in enumerate(scan, start=1):
             hit = next((a["href"] for a in blk.select("a[href]")
                         if config.is_self_url(a["href"])), None)

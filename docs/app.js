@@ -330,7 +330,7 @@
   function sortNum(row, key) {
     if (key === "sv") return row.sv == null ? null : row.sv;
     if (key === "imp") return CATEGORIES[row.category].stars;
-    var weekly = state.view === "weekly";
+    var weekly = state.view === "weekly" || state.view === "trend";
     if (key.indexOf("cmp_") === 0) {
       var comp = null;
       for (var i = 0; i < COMPOSITES.length; i++) if (COMPOSITES[i].id === key.slice(4)) comp = COMPOSITES[i];
@@ -417,49 +417,43 @@
       dot("r") + '<span class="mx-none">미노출</span></td>';
   }
 
-  function trendAt(engine, area, keyword, backDays) {
+  /* weeksAgo=0 → 최근 7일(금주) 평균, 1 → 그 이전 7일(전주) 평균. 유효 순위만 평균. */
+  function weekAvg(engine, area, keyword, weeksAgo) {
     var days = state.trends.days;
     if (!days || !days.length) return null;
     var series = state.trends.series[engine + "|" + area + "|" + keyword];
     if (!series) return null;
-    var idx = days.length - 1 - backDays;
-    if (idx < 0 || idx >= series.length) return null;
-    var v = series[idx];
-    return v == null ? null : v;
+    var end = series.length - weeksAgo * 7;
+    if (end <= 0) return null;
+    var start = Math.max(0, end - 7);
+    var sum = 0, n = 0;
+    for (var i = start; i < end; i++) {
+      if (series[i] != null) { sum += series[i]; n++; }
+    }
+    return n ? sum / n : null;
   }
 
-  /* 순위 Trend 셀 — 전일 대비(가시) + 전주·4주전(툴팁) */
-  function trendCell(rec, ch, keyword) {
-    if (!rec) {
-      var t = ch.excluded ? "구글 광고는 측정 제외" : "측정 제외 / 미수집";
+  /* 순위 Trend 셀 — 주간 트렌드(전주 평균 → 금주 평균, 방향 표시). */
+  function trendCell(ch, keyword) {
+    var cur = weekAvg(ch.engine, ch.area, keyword, 0);
+    var prev = weekAvg(ch.engine, ch.area, keyword, 1);
+    if (cur == null) {
+      var t = ch.excluded ? "구글 광고는 측정 제외" : "최근 7일 순위 데이터 없음";
       return '<td class="mx na" title="' + t + '">' + dot("na") + "</td>";
     }
-    if (BAD_STATUS[rec.status] === 1) {
-      return '<td class="mx na" title="수집이상">' + dot("na") + '<span class="mx-sub">수집이상</span></td>';
-    }
-    var cur = rec.rank, prev = rec.prev_rank;
-    var wk = trendAt(ch.engine, ch.area, keyword, 7);
-    var mo = trendAt(ch.engine, ch.area, keyword, 28);
-    var tip = "전일 " + (prev == null ? "–" : prev + "위") +
-      " · 전주 " + (wk == null ? "–" : wk + "위") +
-      " · 4주전 " + (mo == null ? "–" : mo + "위");
-    if (cur == null && prev == null) {
-      return '<td class="mx" title="미노출 · ' + tip + '">' + dot("r") + '<span class="mx-none">미노출</span></td>';
-    }
-    if (cur == null) {
-      return '<td class="mx" title="노출 이탈 · ' + tip + '">' + dot("r") + '<span class="badge badge-lost">이탈</span></td>';
-    }
+    var tip = "전주 평균 " + (prev == null ? "–" : prev.toFixed(1) + "위") +
+      " → 금주 평균 " + cur.toFixed(1) + "위";
     var body;
     if (prev == null) {
-      body = '<span class="mx-rank">' + cur + '</span> <span class="badge badge-new">신규</span>';
-    } else if (prev === cur) {
-      body = '<span class="mx-trend">' + prev + "→" + cur + "</span>";
+      body = '<span class="mx-rank">' + cur.toFixed(1) + "</span>";
     } else {
-      var arrow = cur < prev ? '<span class="delta-up">▲' + (prev - cur) + "</span>"
-        : '<span class="delta-down">▼' + (cur - prev) + "</span>";
-      body = '<span class="mx-trend">' + prev + "→" + cur + "</span> " + arrow;
+      var d = prev - cur; // >0 = 순위 상승(값 감소)
+      var arrow = Math.abs(d) < 0.05 ? ""
+        : (d > 0 ? ' <span class="delta-up">▲' + d.toFixed(1) + "</span>"
+                 : ' <span class="delta-down">▼' + (-d).toFixed(1) + "</span>");
+      body = '<span class="mx-trend">' + prev.toFixed(1) + "→" + cur.toFixed(1) + "</span>" + arrow;
     }
-    return '<td class="mx" title="' + tip + '">' + dot(rankClass(cur)) + body + "</td>";
+    return '<td class="mx" title="' + esc(tip) + '">' + dot(rankClass(Math.round(cur))) + body + "</td>";
   }
 
   function compositeCell(chMap, comp) {
@@ -471,19 +465,9 @@
       '<span class="cmp-val">' + c.value.toFixed(1) + "</span></td>";
   }
 
-  /* 최근 7일 평균 순위 — trends.json 시계열에서 유효 숫자(측정된 순위)만 평균.
-     이력이 7일 미만이어도 있는 만큼만, null(미노출·수집이상·미측정)은 제외. */
+  /* 최근 7일(금주) 평균 순위 — weekAvg(0). 유효 순위만 평균, 7일 미만이면 있는 만큼. */
   function weeklyAvg(engine, area, keyword) {
-    var days = state.trends.days;
-    if (!days || !days.length) return null;
-    var series = state.trends.series[engine + "|" + area + "|" + keyword];
-    if (!series) return null;
-    var start = Math.max(0, series.length - 7);
-    var sum = 0, n = 0;
-    for (var i = start; i < series.length; i++) {
-      if (series[i] != null) { sum += series[i]; n++; }
-    }
-    return n ? sum / n : null;
+    return weekAvg(engine, area, keyword, 0);
   }
 
   /* 주간 평균 셀 */
@@ -586,10 +570,10 @@
       CHANNELS.forEach(function (ch) {
         var rec = row.channels[ch.key];
         cells += weekly ? weeklyCell(ch, row.keyword)
-          : trend ? trendCell(rec, ch, row.keyword) : statusCell(rec, ch);
+          : trend ? trendCell(ch, row.keyword) : statusCell(rec, ch);
       });
       COMPOSITES.forEach(function (comp) {
-        cells += weekly ? compositeWeeklyCell(row, comp) : compositeCell(row.channels, comp);
+        cells += (weekly || trend) ? compositeWeeklyCell(row, comp) : compositeCell(row.channels, comp);
       });
 
       html += '<tr data-kw="' + esc(row.keyword) + '" title="순위 추이 보기">' +

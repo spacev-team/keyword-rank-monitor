@@ -27,9 +27,9 @@ GitHub cron 특성상 5~20분 지연될 수 있다. 운영 절차는 [`ops/sched
 | 엔진 | 영역 | 방법 | rank 의 의미 |
 |---|---|---|---|
 | naver | ad | PC 통합검색 HTML 파싱 | 파워링크·브랜드검색 광고 유닛(상단+하단 통합) 중 자사 순번 |
-| naver | organic | 〃 | 광고 제외 결과 블록 DOM 순서 중 자사 첫 매칭(섹션명 기록) |
+| naver | organic | 〃 | **웹사이트(일반 웹문서) 결과 내** 자사 순번 — 블로그·카페·뉴스·지식iN·이미지·동영상·플레이스 등 버티컬 제외(랭크트래커 관례, 2026-08-30) |
 | google | organic | SerpAPI(고가) → Serper.dev(저가) → 직접 파싱 순 | 상동. **광고는 측정 제외**(유료 SerpAPI 없이 측정 불가 — 2026-08-07 확정) |
-| daum | ad / organic | 통합검색 HTML 파싱 | 프리미엄링크 / 오가닉 블록 |
+| daum | ad / organic | 통합검색 HTML 파싱 | 프리미엄링크 / **웹문서 컬렉션(통합웹·사이트) 내** 자사 순번(뉴스·동영상·쇼핑·책 등 버티컬 제외) |
 | playstore | app | google_play_scraper.search (상위 30) | 검색 결과 중 자사 앱 순번 |
 | appstore | app | iTunes Search API (상위 200) | 상동 |
 

@@ -168,13 +168,22 @@ class DaumRankCollector(BaseCollector):
         return found
 
     def _scan_organic(self, kw: str, blocks) -> RankRecord:
+        # 오가닉 순위 = 일반 웹문서 컬렉션('통합웹'·'사이트') 내 순번만. 뉴스·동영상·
+        # 쇼핑·책·이미지 등 버티컬은 제외한다(2026-08-30 사용자 리포트: 웹 결과가 아닌
+        # 버티컬 아이템까지 세어 실제 화면·랭크트래커와 순위가 어긋남). 네이버와 동일 원칙.
+        WEB_SECTIONS = ("통합웹", "사이트")
         rank = 0
         found: RankRecord | None = None
+        total_items = 0
         for block in blocks:
             if _is_ad_block(block) or _is_non_result_block(block):
                 continue
             section = _block_label(block)
-            for item in block.select(_ORGANIC_ITEM_SEL):
+            items = block.select(_ORGANIC_ITEM_SEL)
+            total_items += len(items)
+            if section not in WEB_SECTIONS:
+                continue
+            for item in items:
                 if rank >= config.ORGANIC_SCAN_LIMIT:
                     break
                 rank += 1
@@ -186,8 +195,8 @@ class DaumRankCollector(BaseCollector):
                             section=section, matched=url[:300])
             if rank >= config.ORGANIC_SCAN_LIMIT:
                 break
-        if rank == 0:
-            # 통합검색은 결과 0개가 사실상 없으므로 구조 변경으로 간주
+        if total_items == 0:
+            # 통합검색 결과 아이템 0개 = 구조 변경 신호(웹 컬렉션 부재와 구분)
             return RankRecord(self.key, "organic", kw, None, 0, status="parse_fail",
                               detail="오가닉 아이템 0개 추출")
         if found is None:
