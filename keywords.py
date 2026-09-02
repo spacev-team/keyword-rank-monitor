@@ -84,13 +84,13 @@ GENERIC_KEYWORDS: list[str] = [
 #   대시보드 '키워드 × 채널 장악 Matrix'의 Competitor 그룹으로 분류된다.
 #   비우면 Competitor 행은 표시되지 않는다(수집 대상에서도 제외).
 COMPETITOR_KEYWORDS: list[str] = [
-    "air bnb", "dabang", "gobang", "jikbang", "livanywhere",
+    "air bnb", "airbnb", "dabang", "gobang", "jikbang", "livanywhere",
     "peterpan", "spacecloud", "stayfolio", "tabang", "zikbang", "zipbang",
     "ziptoss", "enkostay",
-    "고방", "네이버 부동산", "다방", "독립생활",
+    "고방", "네이버 부동산", "네이버부동산", "다방", "독립생활",
     "리브애니", "리브애니웨어", "미멘", "미스터멘션", "미스터홈즈",
     "스테이폴리오", "스폴", "에어비앤비", "에어비엔비", "위홈", "지냄",
-    "직방", "집토스", "피터팬", "피터팬의 좋은방 구하기", "호갱노노", "호텔에삶",
+    "직방", "집토스", "피터팬", "피터팬의 좋은방 구하기", "피터팬의좋은방구하기", "호갱노노", "호텔에삶",
     "엔코스테이", "자리톡", "단단홈즈", "플라트라이프",
 ]
 
@@ -98,7 +98,8 @@ COMPETITOR_KEYWORDS: list[str] = [
 #   캠페인 성과를 한 눈에 보려는 전용 카테고리. 다른 그룹(Brand·Category)보다 우선
 #   분류된다 — 삼삼엠투·33M2(Brand)·단기임대(Category)는 여기로 이동한다(배타적, 사용자 확정).
 CAMPAIGN_KEYWORDS: list[str] = [
-    "단기임대", "삼삼엠투", "잠깐 살 집", "모두를 위한 단기임대", "33M2",
+    "단기임대", "삼삼엠투", "잠깐 살 집", "잠깐살집",
+    "모두를 위한 단기임대", "모두를위한단기임대", "33M2",
 ]
 
 
@@ -108,16 +109,22 @@ def all_keywords() -> list[tuple[str, str]]:
     우선순위: campaign > competitor > (brand·brand_ext·generic). 상위 그룹에 있는 키워드는
     하위 그룹에서 건너뛴다 — 대시보드 구분이 사용자 의도와 어긋나지 않도록 선점을 막는다
     (예: 삼삼엠투·33M2·단기임대 → campaign, 고시원·달방은 competitor 아님 → generic)."""
+    keyword_groups = ((BRAND_KEYWORDS, "brand"),
+                      (BRAND_EXPANDED, "brand_ext"),
+                      (GENERIC_KEYWORDS, "generic"),
+                      (COMPETITOR_KEYWORDS, "competitor"),
+                      (CAMPAIGN_KEYWORDS, "campaign"))
+    registered = {kw for kw_list, _ in keyword_groups for kw in kw_list}
+    for kw_list, _ in keyword_groups:
+        for kw in kw_list:
+            if " " in kw and kw.replace(" ", "") not in registered:
+                raise ValueError(f"spaced keyword lacks compact counterpart: {kw!r}")
     campaign_set = set(CAMPAIGN_KEYWORDS)
     comp_set = set(COMPETITOR_KEYWORDS)
     priority = campaign_set | comp_set
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
-    for kw_list, group in ((BRAND_KEYWORDS, "brand"),
-                           (BRAND_EXPANDED, "brand_ext"),
-                           (GENERIC_KEYWORDS, "generic"),
-                           (COMPETITOR_KEYWORDS, "competitor"),
-                           (CAMPAIGN_KEYWORDS, "campaign")):
+    for kw_list, group in keyword_groups:
         for kw in kw_list:
             if kw in seen:
                 continue
