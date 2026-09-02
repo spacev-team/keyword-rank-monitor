@@ -117,8 +117,14 @@ def all_keywords() -> list[tuple[str, str]]:
     registered = {kw for kw_list, _ in keyword_groups for kw in kw_list}
     for kw_list, _ in keyword_groups:
         for kw in kw_list:
-            if " " in kw and kw.replace(" ", "") not in registered:
-                raise ValueError(f"spaced keyword lacks compact counterpart: {kw!r}")
+            if any(character.isspace() for character in kw):
+                compact = "".join(
+                    character for character in kw if not character.isspace()
+                )
+                if compact not in registered:
+                    raise ValueError(
+                        f"whitespace-bearing keyword lacks compact counterpart: {kw!r}"
+                    )
     campaign_set = set(CAMPAIGN_KEYWORDS)
     comp_set = set(COMPETITOR_KEYWORDS)
     priority = campaign_set | comp_set
