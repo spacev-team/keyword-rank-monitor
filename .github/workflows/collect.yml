@@ -5,10 +5,11 @@ run-name: collect ${{ inputs.mode || 'scheduled' }}
 # workflow_dispatch 구조였으나 org PAT 승인 대기 + 개인 토큰 과권한 문제로 전환.
 # 이 프로젝트는 런마다 독립 스냅샷(run_id)이라 트리거 중복이 무해해 EMM 의
 # 'cron 금지(중복 적재)' 원칙이 적용되지 않는다. GitHub cron 은 5~20분 지연될 수
-# 있음(추세 프록시 용도라 허용). 분값 37 = 정시/30분 혼잡 회피(지연 완화).
+# 있음(추세 프록시 용도라 허용). 전일 데이터가 확정된 새벽에 수집하고, 분값 37로
+# 정시/30분 혼잡을 피한다.
 on:
   schedule:
-    - cron: "37 3 * * *"   # 12:37 KST — daily(구글 포함 전체, 하루 1회)
+    - cron: "37 17 * * *"  # 02:37 KST — 전일 데이터 daily 수집(UTC 기준 전날 17:37)
   workflow_dispatch:
     inputs:
       mode:
