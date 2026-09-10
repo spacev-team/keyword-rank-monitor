@@ -254,7 +254,7 @@ td.time { color: var(--muted); font-size: 0.82rem; }
 .badge-s-parse_fail, .badge-s-error { background: #FDEAEA; color: var(--err); }
 
 .spark { display: block; }
-.spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .spark circle { fill: var(--accent); }
 .spark-empty { color: var(--muted); font-size: 0.8rem; }
 

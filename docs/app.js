@@ -26,7 +26,60 @@
   ];
   var BAD_STATUS = { blocked: 1, parse_fail: 1, error: 1 };
   var BRAND_GROUPS = { brand: 1, brand_ext: 1 };
-  var CHART_COLORS = ["#6B4EFF", "#14934A", "#E07C1F", "#D93838", "#2A7DE1", "#8E44AD", "#0FA3A3", "#B8860B"];
+  /* bklit 풍 차트 팔레트 — 저채도·고가독 (index 순환 배정) */
+  var CHART_COLORS = ["#6B4EFF", "#10B981", "#F59E0B", "#F43F5E", "#0EA5E9", "#A855F7", "#14B8A6", "#94A3B8"];
+
+  /* ── bklit 풍 Chart.js 전역 설정 + 세로 크로스헤어 플러그인 ── */
+  if (typeof Chart !== "undefined") {
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = "#9C9AB0";
+    Chart.register({
+      id: "crosshair",
+      afterDatasetsDraw: function (chart) {
+        var active = chart.tooltip && chart.tooltip.getActiveElements();
+        if (!active || !active.length) return;
+        var x = active[0].element.x;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(38, 36, 58, 0.18)";
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+  }
+
+  /* 라인 아래 은은한 그라디언트 area fill (bklit 시그니처).
+     stop 은 chartArea 가 아니라 해당 시리즈 라인의 y-픽셀 범위에 앵커 —
+     라인 위치에서 최대 알파, 차트 하단에서 0. */
+  function chartGradient(color) {
+    return function (ctx) {
+      var chart = ctx.chart;
+      var area = chart.chartArea;
+      if (!area) return color + "14";
+      var top = area.top;
+      var meta = chart.getDatasetMeta(ctx.datasetIndex);
+      if (meta && meta.data && meta.data.length) {
+        var ys = [];
+        for (var i = 0; i < meta.data.length; i++) {
+          var y = meta.data[i].y;
+          if (isFinite(y)) ys.push(y);
+        }
+        if (ys.length) top = Math.min.apply(null, ys);
+      }
+      if (!(top < area.bottom)) return "transparent"; /* 라인이 하단 경계 — fill 영역 없음 */
+      var g = chart.ctx.createLinearGradient(0, top, 0, area.bottom);
+      g.addColorStop(0, color + "26");
+      g.addColorStop(1, color + "00");
+      return g;
+    };
+  }
 
   /* ── 매트릭스 채널(열) 정의 — 목업 순서 그대로 ──
      excluded=true 는 상시 측정 제외(구글 광고). key = engine|area 로 records 조인. */
@@ -621,12 +674,31 @@
         label: (ENGINE_LABEL[p[0]] || p[0]) + " · " + (AREA_LABEL[p[1]] || p[1]),
         data: series,
         borderColor: color,
-        backgroundColor: color,
+        borderWidth: 2,
+        borderCapStyle: "round",
+        cubicInterpolationMode: "monotone",
         spanGaps: false,
-        tension: 0.2,
-        pointRadius: days.length === 1 ? 4 : 2.5
+        fill: "start",
+        backgroundColor: chartGradient(color),
+        pointRadius: function (ctx) {
+          var d = ctx.dataset.data, i = ctx.dataIndex;
+          if (d[i] == null) return 0;
+          /* 이웃이 모두 null 인 고립 측정값은 도트로 표시(주1회 수집 채널 등) */
+          var alone = (i === 0 || d[i - 1] == null) && (i === d.length - 1 || d[i + 1] == null);
+          return alone ? 3 : 0;
+        },
+        pointHoverRadius: 4.5,
+        pointHoverBorderWidth: 2,
+        pointBackgroundColor: color,
+        pointHoverBackgroundColor: "#FFFFFF",
+        pointHoverBorderColor: color
       });
     });
+
+    /* area fill 은 단일 시리즈일 때만 — 다중 시리즈 중첩 시 판독성 저하 */
+    if (datasets.length > 1) {
+      datasets.forEach(function (d) { d.fill = false; d.backgroundColor = d.borderColor; });
+    }
 
     if (state.chart) { state.chart.destroy(); state.chart = null; }
     state.chart = new Chart($("modalChart"), {
@@ -635,15 +707,60 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: { mode: "nearest", intersect: false },
+        interaction: { mode: "index", intersect: false },
         scales: {
+          x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { maxRotation: 0, autoSkipPadding: 18 }
+          },
           y: {
             reverse: true,
             min: 1,
-            ticks: { precision: 0, callback: function (v) { return v + "위"; } }
+            grid: { color: "rgba(38, 36, 58, 0.06)" },
+            border: { display: false, dash: [3, 3] },
+            ticks: {
+              precision: 0,
+              padding: 6,
+              callback: function (v) { return v + "위"; }
+            }
           }
         },
-        plugins: { legend: { position: "bottom", labels: { boxWidth: 12, boxHeight: 12 } } }
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              usePointStyle: true,
+              pointStyle: "circle",
+              boxWidth: 7,
+              boxHeight: 7,
+              padding: 14,
+              color: "#6E6C85"
+            }
+          },
+          tooltip: {
+            backgroundColor: "#FFFFFF",
+            titleColor: "#26243A",
+            titleFont: { weight: "600" },
+            bodyColor: "#6E6C85",
+            borderColor: "#E5E4F0",
+            borderWidth: 1,
+            cornerRadius: 10,
+            padding: 12,
+            boxWidth: 7,
+            boxHeight: 7,
+            boxPadding: 4,
+            usePointStyle: true,
+            caretSize: 0,
+            filter: function (item) { return item.parsed.y != null; },
+            itemSort: function (a, b) { return a.parsed.y - b.parsed.y; },
+            callbacks: {
+              label: function (ctx) {
+                return " " + ctx.dataset.label + ": " + ctx.parsed.y + "위";
+              }
+            }
+          }
+        }
       }
     });
 
